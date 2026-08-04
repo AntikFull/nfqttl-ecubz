@@ -39,12 +39,12 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y dos2unix zip
           dos2unix service.sh customize.sh module.prop LICENSE README.md CHANGELOG.md 2>/dev/null || true
-          chmod 755 service.sh customize.sh nfqttl
+          chmod 755 service.sh customize.sh nfqttl libs/*/* 2>/dev/null || true
 
-      - name: Package Magisk/KSU Module ZIP
+      - name: Package Universal Magisk/KSU Module ZIP
         run: |
           ZIP_NAME="nfqttl-${VERSION}.zip"
-          zip -r "$ZIP_NAME" module.prop service.sh customize.sh nfqttl LICENSE README.md CHANGELOG.md
+          zip -r "$ZIP_NAME" module.prop service.sh customize.sh nfqttl libs LICENSE README.md CHANGELOG.md
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Create GitHub Release
