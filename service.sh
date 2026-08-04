@@ -148,7 +148,7 @@ fi
 
 # 6. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
 if [ "$DEBUG_MODE" -eq 1 ]; then
-    if [ -x "$MODDIR/debug_log.sh" ]; then
+    if [ -f "$MODDIR/debug_log.sh" ]; then
         sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &
     fi
 fi
