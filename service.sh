@@ -2,7 +2,7 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v5.3 - Smart Multi-Engine Mobile Tethering & Custom Blocklist
+# Nfqttl eCubz v5.4 - Smart Multi-Engine Mobile Tethering & Diagnostic Suite
 # ============================================================================
 
 PGREP_BIN=/system/bin/pgrep
@@ -69,9 +69,6 @@ fi
 
 # 5. Авто-выбор движка подмены IPv4 TTL: Kernel TTL vs Userspace NFQUEUE
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
-    # ------------------------------------------------------------------------
-    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
-    # ------------------------------------------------------------------------
     iptables -t mangle -D POSTROUTING -o rmnet+ -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o rmnet_data+ -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D PREROUTING -i wlan+ -j TTL --ttl-set 64 2>/dev/null || true
@@ -80,9 +77,6 @@ if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     iptables -t mangle -A POSTROUTING -o rmnet_data+ -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -A PREROUTING -i wlan+ -j TTL --ttl-set 64 2>/dev/null || true
 else
-    # ------------------------------------------------------------------------
-    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (с Watchdog и --queue-bypass)
-    # ------------------------------------------------------------------------
     if ! nfqttl_alive; then
         "$MODDIR/nfqttl" -d -s -u
         sleep 2
@@ -104,7 +98,6 @@ else
     ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
     ip6tables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
 
-    # Watchdog для защиты работы NFQUEUE демона
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
     WD_INTERVAL=60
     WD_MAX_RESTARTS=20
@@ -137,6 +130,13 @@ else
     }
 
     watchdog &
+fi
+
+# 6. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
+if [ -f "$MODDIR/debug" ] || [ -f "$MODDIR/DEBUG" ]; then
+    if [ -x "$MODDIR/debug_log.sh" ]; then
+        sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &
+    fi
 fi
 
 exit 0

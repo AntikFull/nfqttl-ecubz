@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v5.3
-versionCode=8
+version=v5.4
+versionCode=9
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Custom blocklist.txt & Anti-MTS protection. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, blocklist.txt, Anti-MTS protection & debug_log.sh diagnostics. github: https://github.com/AntikFull/nfqttl-ecubz
