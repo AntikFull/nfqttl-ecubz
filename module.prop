@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v5.0
-versionCode=5
+version=v5.1
+versionCode=6
 author=Cyborg-one / eCubz
-description=Nfqttl is a module fix heder field ttl. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, TCP MSS clamping & IPv6 protection. github: https://github.com/AntikFull/nfqttl-ecubz

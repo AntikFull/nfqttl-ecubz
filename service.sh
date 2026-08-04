@@ -1,128 +1,132 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
 
-count=0
-while true
-do
-    if ps -A | grep -v grep | grep -q "$MODDIR/nfqttl"
-    then
-        break
-    fi
-    if [ "$count" -ge 8 ]
-    then
-        $MODDIR/nfqttl -d -s -u
-        sleep 2
-        break
-    fi
-    count=$((count+1))
-    $MODDIR/nfqttl -d -s -u
-    sleep 3
-done
+# ============================================================================
+# Nfqttl eCubz v5.1 - Smart Multi-Engine Mobile Tethering Protection
+# ============================================================================
 
+# Очистка старых правил
 iptables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
-ip6tables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
-ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
-
-iptables -t mangle -N nfqttlo 2>/dev/null || true
-iptables -t mangle -F nfqttlo
-# --queue-bypass: если демон nfqttl умрёт, пакеты пойдут мимо очереди, а не в
-# никуда. Без этого флага падение демона = полная потеря связи до перезагрузки
-# (подмена TTL при этом отвалится, раздача станет видна оператору — но интернет
-# останется). Демон падал с SIGSEGV 8 раз за 22.07, так что это не теория.
-iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
-
 iptables -t mangle -D POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
-iptables -t mangle -A POSTROUTING -o rmnet+ -j nfqttlo
-iptables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo
-iptables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo
+iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-ip6tables -t mangle -N nfqttlo 2>/dev/null || true
-ip6tables -t mangle -F nfqttlo
-ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
-
+ip6tables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
+ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
-ip6tables -t mangle -A POSTROUTING -o rmnet+ -j nfqttlo
-ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo
-ip6tables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo
+ip6tables -t mangle -D FORWARD -i wlan+ -j DROP 2>/dev/null || true
 
-# ============================================================================
-# Watchdog
-# ----------------------------------------------------------------------------
-# Штатно service.sh запускает демон один раз при загрузке и больше за ним не
-# следит. nfqttl падал с SIGSEGV 8 раз за 22.07 — после каждого падения подмена
-# TTL молча переставала работать до перезагрузки.
-#
-# Проверка намеренно дешёвая: один pgrep раз в 60 с, никаких конвейеров из
-# ps|grep|grep. Стоимость — примерно один форк в минуту.
-# ============================================================================
+# 1. Коррекция TCP MSS (защита от детекции размера TCP окна ПК)
+iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-WD_LOG=/data/local/tmp/nfqttl_watchdog.log
-WD_INTERVAL=60
-WD_MAX_RESTARTS=20
+# 2. Безопасная обработка IPv6 (Защита от утечки IPv6 TTL на раздаче)
+if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
+    # Если ядро поддерживает HL (Hop Limit) для IPv6:
+    ip6tables -t mangle -A POSTROUTING -o rmnet+ -j HL --hl-set 64 2>/dev/null || true
+    ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j HL --hl-set 64 2>/dev/null || true
+else
+    # Блокировка IPv6 FORWARD на раздаче, чтобы не палить раздачу оператору
+    ip6tables -t mangle -A FORWARD -i wlan+ -j DROP 2>/dev/null || true
+fi
 
-wd_log() {
-    # лог не даём разрастаться
-    if [ -f "$WD_LOG" ] && [ "$(wc -c < "$WD_LOG" 2>/dev/null || echo 0)" -gt 65536 ]; then
-        tail -n 50 "$WD_LOG" > "$WD_LOG.tmp" 2>/dev/null && mv "$WD_LOG.tmp" "$WD_LOG"
-    fi
-    echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$WD_LOG"
-}
+# 3. Авто-выбор движка подмены IPv4 TTL: Kernel TTL vs Userspace NFQUEUE
+if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
+    # ------------------------------------------------------------------------
+    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
+    # ------------------------------------------------------------------------
+    iptables -t mangle -D POSTROUTING -o rmnet+ -j TTL --ttl-set 64 2>/dev/null || true
+    iptables -t mangle -D POSTROUTING -o rmnet_data+ -j TTL --ttl-set 64 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i wlan+ -j TTL --ttl-set 64 2>/dev/null || true
 
-# ВАЖНО: KernelSU запускает скрипты модулей с ASH_STANDALONE=1. В этом режиме
-# busybox подставляет свои апплеты вместо системных бинарников, а busybox'ный
-# `pgrep -x` процесс НЕ находит (проверено: /system/bin/pgrep -x nfqttl -> 3070,
-# busybox pgrep -x nfqttl -> пусто). Из-за этого watchdog считал живой демон
-# мёртвым и перезапускал его вхолостую раз в минуту.
-# Поэтому зовём системный бинарник по абсолютному пути, а если его вдруг нет —
-# читаем /proc напрямую, без внешних утилит вообще.
-PGREP_BIN=/system/bin/pgrep
-
-nfqttl_alive() {
-    if [ -x "$PGREP_BIN" ]; then
-        "$PGREP_BIN" -x nfqttl >/dev/null 2>&1
-        return $?
-    fi
-    for _p in /proc/[0-9]*; do
-        [ -r "$_p/comm" ] || continue
-        read -r _c < "$_p/comm" 2>/dev/null || continue
-        [ "$_c" = "nfqttl" ] && return 0
-    done
-    return 1
-}
-
-watchdog() {
-    restarts=0
-    wd_log "watchdog запущен (интервал ${WD_INTERVAL}с, лимит ${WD_MAX_RESTARTS} перезапусков)"
+    iptables -t mangle -A POSTROUTING -o rmnet+ -j TTL --ttl-set 64 2>/dev/null || true
+    iptables -t mangle -A POSTROUTING -o rmnet_data+ -j TTL --ttl-set 64 2>/dev/null || true
+    iptables -t mangle -A PREROUTING -i wlan+ -j TTL --ttl-set 64 2>/dev/null || true
+else
+    # ------------------------------------------------------------------------
+    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (с Watchdog и --queue-bypass)
+    # ------------------------------------------------------------------------
+    count=0
     while true; do
-        sleep "$WD_INTERVAL"
-
-        nfqttl_alive && continue
-
-        if [ "$restarts" -ge "$WD_MAX_RESTARTS" ]; then
-            wd_log "демон мёртв, лимит перезапусков исчерпан — прекращаю попытки"
-            wd_log "правила стоят с --queue-bypass, связь работает без подмены TTL"
+        if ps -A | grep -v grep | grep -q "$MODDIR/nfqttl"; then
             break
         fi
-
-        restarts=$((restarts + 1))
-        wd_log "демон не найден, перезапуск #$restarts"
-        "$MODDIR/nfqttl" -d -s -u
-        sleep 3
-
-        if nfqttl_alive; then
-            wd_log "перезапуск #$restarts успешен"
-        else
-            wd_log "перезапуск #$restarts не удался"
+        if [ "$count" -ge 8 ]; then
+            $MODDIR/nfqttl -d -s -u
+            sleep 2
+            break
         fi
+        count=$((count+1))
+        $MODDIR/nfqttl -d -s -u
+        sleep 3
     done
-    wd_log "watchdog остановлен"
-}
 
-watchdog &
+    iptables -t mangle -N nfqttlo 2>/dev/null || true
+    iptables -t mangle -F nfqttlo
+    iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
+
+    iptables -t mangle -A POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
+    iptables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
+    iptables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
+
+    ip6tables -t mangle -N nfqttlo 2>/dev/null || true
+    ip6tables -t mangle -F nfqttlo
+    ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
+
+    ip6tables -t mangle -A POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
+    ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
+    ip6tables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
+
+    # Watchdog для защиты работы NFQUEUE демона
+    WD_LOG=/data/local/tmp/nfqttl_watchdog.log
+    WD_INTERVAL=60
+    WD_MAX_RESTARTS=20
+    PGREP_BIN=/system/bin/pgrep
+
+    wd_log() {
+        if [ -f "$WD_LOG" ] && [ "$(wc -c < "$WD_LOG" 2>/dev/null || echo 0)" -gt 65536 ]; then
+            tail -n 50 "$WD_LOG" > "$WD_LOG.tmp" 2>/dev/null && mv "$WD_LOG.tmp" "$WD_LOG"
+        fi
+        echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$WD_LOG"
+    }
+
+    nfqttl_alive() {
+        if [ -x "$PGREP_BIN" ]; then
+            "$PGREP_BIN" -x nfqttl >/dev/null 2>&1
+            return $?
+        fi
+        for _p in /proc/[0-9]*; do
+            [ -r "$_p/comm" ] || continue
+            read -r _c < "$_p/comm" 2>/dev/null || continue
+            [ "$_c" = "nfqttl" ] && return 0
+        done
+        return 1
+    }
+
+    watchdog() {
+        restarts=0
+        wd_log "watchdog запущен (интервал ${WD_INTERVAL}с, лимит ${WD_MAX_RESTARTS} перезапусков)"
+        while true; do
+            sleep "$WD_INTERVAL"
+
+            nfqttl_alive && continue
+
+            if [ "$restarts" -ge "$WD_MAX_RESTARTS" ]; then
+                wd_log "демон мёртв, лимит перезапусков исчерпан — прекращаю попытки"
+                break
+            fi
+
+            restarts=$((restarts + 1))
+            wd_log "демон не найден, перезапуск #$restarts"
+            "$MODDIR/nfqttl" -d -s -u
+            sleep 3
+        done
+    }
+
+    watchdog &
+fi
 
 exit 0
