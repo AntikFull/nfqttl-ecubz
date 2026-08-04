@@ -5,6 +5,25 @@ MODDIR=${0%/*}
 # Nfqttl eCubz v5.1 - Smart Multi-Engine Mobile Tethering Protection
 # ============================================================================
 
+PGREP_BIN=/system/bin/pgrep
+
+nfqttl_alive() {
+    if [ -x "$PGREP_BIN" ]; then
+        "$PGREP_BIN" -x nfqttl >/dev/null 2>&1
+        return $?
+    fi
+    for _p in /proc/[0-9]*; do
+        [ -r "$_p/comm" ] || continue
+        read -r _c < "$_p/comm" 2>/dev/null || continue
+        [ "$_c" = "nfqttl" ] && return 0
+    done
+    return 1
+}
+
+# Сброс старых процессов демона при перезапуске
+pkill -9 nfqttl 2>/dev/null || true
+sleep 1
+
 # Очистка старых правил
 iptables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
@@ -25,11 +44,9 @@ iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --cla
 
 # 2. Безопасная обработка IPv6 (Защита от утечки IPv6 TTL на раздаче)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
-    # Если ядро поддерживает HL (Hop Limit) для IPv6:
     ip6tables -t mangle -A POSTROUTING -o rmnet+ -j HL --hl-set 64 2>/dev/null || true
     ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j HL --hl-set 64 2>/dev/null || true
 else
-    # Блокировка IPv6 FORWARD на раздаче, чтобы не палить раздачу оператору
     ip6tables -t mangle -A FORWARD -i wlan+ -j DROP 2>/dev/null || true
 fi
 
@@ -49,20 +66,10 @@ else
     # ------------------------------------------------------------------------
     # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (с Watchdog и --queue-bypass)
     # ------------------------------------------------------------------------
-    count=0
-    while true; do
-        if ps -A | grep -v grep | grep -q "$MODDIR/nfqttl"; then
-            break
-        fi
-        if [ "$count" -ge 8 ]; then
-            $MODDIR/nfqttl -d -s -u
-            sleep 2
-            break
-        fi
-        count=$((count+1))
-        $MODDIR/nfqttl -d -s -u
-        sleep 3
-    done
+    if ! nfqttl_alive; then
+        "$MODDIR/nfqttl" -d -s -u
+        sleep 2
+    fi
 
     iptables -t mangle -N nfqttlo 2>/dev/null || true
     iptables -t mangle -F nfqttlo
@@ -84,26 +91,12 @@ else
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
     WD_INTERVAL=60
     WD_MAX_RESTARTS=20
-    PGREP_BIN=/system/bin/pgrep
 
     wd_log() {
         if [ -f "$WD_LOG" ] && [ "$(wc -c < "$WD_LOG" 2>/dev/null || echo 0)" -gt 65536 ]; then
             tail -n 50 "$WD_LOG" > "$WD_LOG.tmp" 2>/dev/null && mv "$WD_LOG.tmp" "$WD_LOG"
         fi
         echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$WD_LOG"
-    }
-
-    nfqttl_alive() {
-        if [ -x "$PGREP_BIN" ]; then
-            "$PGREP_BIN" -x nfqttl >/dev/null 2>&1
-            return $?
-        fi
-        for _p in /proc/[0-9]*; do
-            [ -r "$_p/comm" ] || continue
-            read -r _c < "$_p/comm" 2>/dev/null || continue
-            [ "$_c" = "nfqttl" ] && return 0
-        done
-        return 1
     }
 
     watchdog() {
