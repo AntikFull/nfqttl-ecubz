@@ -2,7 +2,7 @@
 ui_print " "
 ui_print " ******************************* "
 ui_print " *  Magisk Module Nfqttl eCubz   * "
-ui_print " *        Version v5.4         * "
+ui_print " *        Version v5.5         * "
 ui_print " ******************************* "
 ui_print " "
 

@@ -2,7 +2,7 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v5.4 - Smart Multi-Engine Mobile Tethering & Diagnostic Suite
+# Nfqttl eCubz v5.5 - Smart Tethering, Custom Blocklist & Traffic Trace Log
 # ============================================================================
 
 PGREP_BIN=/system/bin/pgrep
@@ -24,6 +24,11 @@ nfqttl_alive() {
 pkill -9 nfqttl 2>/dev/null || true
 sleep 1
 
+DEBUG_MODE=0
+if [ -f "$MODDIR/debug" ] || [ -f "$MODDIR/DEBUG" ]; then
+    DEBUG_MODE=1
+fi
+
 # Очистка старых правил
 iptables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
@@ -33,6 +38,7 @@ iptables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
 iptables -t mangle -D FORWARD -i wlan+ -p udp --dport 123 -j DROP 2>/dev/null || true
+iptables -t mangle -D FORWARD -i wlan+ -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
 
 ip6tables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
@@ -41,7 +47,10 @@ ip6tables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D FORWARD -i wlan+ -j DROP 2>/dev/null || true
 
-# 1. Защита от NTP
+# 1. Защита от NTP (с логированием в дебаг режиме)
+if [ "$DEBUG_MODE" -eq 1 ]; then
+    iptables -t mangle -A FORWARD -i wlan+ -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
+fi
 iptables -t mangle -A FORWARD -i wlan+ -p udp --dport 123 -j DROP 2>/dev/null || true
 
 # 2. Динамический парсинг и подгрузка блокировок из blocklist.txt
@@ -51,7 +60,12 @@ if [ -f "$BLOCKLIST_FILE" ]; then
         domain=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\r')
         [ -z "$domain" ] && continue
 
+        iptables -t mangle -D FORWARD -i wlan+ -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
         iptables -t mangle -D FORWARD -i wlan+ -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+
+        if [ "$DEBUG_MODE" -eq 1 ]; then
+            iptables -t mangle -A FORWARD -i wlan+ -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
+        fi
         iptables -t mangle -A FORWARD -i wlan+ -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
     done < "$BLOCKLIST_FILE"
 fi
@@ -133,7 +147,7 @@ else
 fi
 
 # 6. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
-if [ -f "$MODDIR/debug" ] || [ -f "$MODDIR/DEBUG" ]; then
+if [ "$DEBUG_MODE" -eq 1 ]; then
     if [ -x "$MODDIR/debug_log.sh" ]; then
         sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &
     fi
