@@ -2,7 +2,7 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v5.2 - Smart Multi-Engine Mobile Tethering & Anti-MTS Protection
+# Nfqttl eCubz v5.3 - Smart Multi-Engine Mobile Tethering & Custom Blocklist
 # ============================================================================
 
 PGREP_BIN=/system/bin/pgrep
@@ -32,12 +32,7 @@ iptables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-# Очистка правил анти-детекции МТС/операторов
 iptables -t mangle -D FORWARD -i wlan+ -p udp --dport 123 -j DROP 2>/dev/null || true
-iptables -t mangle -D FORWARD -i wlan+ -m string --string "msftncsi" --algo bm -j DROP 2>/dev/null || true
-iptables -t mangle -D FORWARD -i wlan+ -m string --string "msftconnecttest" --algo bm -j DROP 2>/dev/null || true
-iptables -t mangle -D FORWARD -i wlan+ -m string --string "time.windows.com" --algo bm -j DROP 2>/dev/null || true
-iptables -t mangle -D FORWARD -i wlan+ -m string --string "captive.apple.com" --algo bm -j DROP 2>/dev/null || true
 
 ip6tables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
@@ -46,17 +41,25 @@ ip6tables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D FORWARD -i wlan+ -j DROP 2>/dev/null || true
 
-# 1. Защита от Анти-TTL МТС: Блокировка комп-маркеров (Windows NCSI / NTP / Apple Captive)
+# 1. Защита от NTP
 iptables -t mangle -A FORWARD -i wlan+ -p udp --dport 123 -j DROP 2>/dev/null || true
-iptables -t mangle -A FORWARD -i wlan+ -m string --string "msftncsi" --algo bm -j DROP 2>/dev/null || true
-iptables -t mangle -A FORWARD -i wlan+ -m string --string "msftconnecttest" --algo bm -j DROP 2>/dev/null || true
-iptables -t mangle -A FORWARD -i wlan+ -m string --string "time.windows.com" --algo bm -j DROP 2>/dev/null || true
-iptables -t mangle -A FORWARD -i wlan+ -m string --string "captive.apple.com" --algo bm -j DROP 2>/dev/null || true
 
-# 2. Коррекция TCP MSS (защита от детекции размера TCP окна ПК)
+# 2. Динамический парсинг и подгрузка блокировок из blocklist.txt
+BLOCKLIST_FILE="$MODDIR/blocklist.txt"
+if [ -f "$BLOCKLIST_FILE" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        domain=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\r')
+        [ -z "$domain" ] && continue
+
+        iptables -t mangle -D FORWARD -i wlan+ -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+        iptables -t mangle -A FORWARD -i wlan+ -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+    done < "$BLOCKLIST_FILE"
+fi
+
+# 3. Коррекция TCP MSS (защита от детекции размера TCP окна ПК)
 iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-# 3. Безопасная обработка IPv6 (Защита от утечки IPv6 TTL на раздаче)
+# 4. Безопасная обработка IPv6 (Защита от утечки IPv6 TTL на раздаче)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
     ip6tables -t mangle -A POSTROUTING -o rmnet+ -j HL --hl-set 64 2>/dev/null || true
     ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j HL --hl-set 64 2>/dev/null || true
@@ -64,7 +67,7 @@ else
     ip6tables -t mangle -A FORWARD -i wlan+ -j DROP 2>/dev/null || true
 fi
 
-# 4. Авто-выбор движка подмены IPv4 TTL: Kernel TTL vs Userspace NFQUEUE
+# 5. Авто-выбор движка подмены IPv4 TTL: Kernel TTL vs Userspace NFQUEUE
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     # ------------------------------------------------------------------------
     # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)

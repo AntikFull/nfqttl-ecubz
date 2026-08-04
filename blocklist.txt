@@ -1,0 +1,8 @@
+# Nfqttl eCubz Custom Blocklist
+# Пользовательский список доменов и ключевых слов для блокировки детекции раздачи.
+# Каждая запись с новой строки. Записи, начинающиеся с #, игнорируются.
+
+msftncsi
+msftconnecttest
+time.windows.com
+captive.apple.com
