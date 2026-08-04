@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v5.7
-versionCode=12
+version=v6.0
+versionCode=13
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Universal OnePlus/ColorOS/OxygenOS support & Custom blocklist. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, Universal OnePlus/ColorOS/OxygenOS support, Custom blocklist & Action button UI. github: https://github.com/AntikFull/nfqttl-ecubz
