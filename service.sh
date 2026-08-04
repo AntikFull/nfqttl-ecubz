@@ -2,7 +2,8 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v5.5 - Smart Tethering, Custom Blocklist & Traffic Trace Log
+# Nfqttl eCubz v5.7 - Universal Multi-Vendor Tethering & Anti-DPI Engine
+# Supported OS: ColorOS/OxygenOS (OnePlus), HyperOS, OneUI, AOSP, MTK, Qualcomm
 # ============================================================================
 
 PGREP_BIN=/system/bin/pgrep
@@ -34,24 +35,33 @@ iptables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o r_rmnet_data+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o rmnet_mhi+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o rmnet_ipa+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o ccmni+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o pdp+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o ap+ -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D POSTROUTING -o swlan+ -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-iptables -t mangle -D FORWARD -i wlan+ -p udp --dport 123 -j DROP 2>/dev/null || true
-iptables -t mangle -D FORWARD -i wlan+ -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
+# Очистка правил NTP
+for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
+    ip6tables -t mangle -D FORWARD -i "$_if" -j DROP 2>/dev/null || true
+done
 
 ip6tables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
-ip6tables -t mangle -D POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
-ip6tables -t mangle -D POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
-ip6tables -t mangle -D POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
-ip6tables -t mangle -D FORWARD -i wlan+ -j DROP 2>/dev/null || true
 
-# 1. Защита от NTP (с логированием в дебаг режиме)
-if [ "$DEBUG_MODE" -eq 1 ]; then
-    iptables -t mangle -A FORWARD -i wlan+ -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
-fi
-iptables -t mangle -A FORWARD -i wlan+ -p udp --dport 123 -j DROP 2>/dev/null || true
+# 1. Защита от NTP на всех возможных интерфейсах раздачи
+for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+    if [ "$DEBUG_MODE" -eq 1 ]; then
+        iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
+    fi
+    iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
+done
 
 # 2. Динамический парсинг и подгрузка блокировок из blocklist.txt
 BLOCKLIST_FILE="$MODDIR/blocklist.txt"
@@ -60,13 +70,15 @@ if [ -f "$BLOCKLIST_FILE" ]; then
         domain=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\r')
         [ -z "$domain" ] && continue
 
-        iptables -t mangle -D FORWARD -i wlan+ -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
-        iptables -t mangle -D FORWARD -i wlan+ -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+        for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+            iptables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
+            iptables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
 
-        if [ "$DEBUG_MODE" -eq 1 ]; then
-            iptables -t mangle -A FORWARD -i wlan+ -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
-        fi
-        iptables -t mangle -A FORWARD -i wlan+ -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+            if [ "$DEBUG_MODE" -eq 1 ]; then
+                iptables -t mangle -A FORWARD -i "$_if" -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
+            fi
+            iptables -t mangle -A FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
+        done
     done < "$BLOCKLIST_FILE"
 fi
 
@@ -75,22 +87,28 @@ iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --cla
 
 # 4. Безопасная обработка IPv6 (Защита от утечки IPv6 TTL на раздаче)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
-    ip6tables -t mangle -A POSTROUTING -o rmnet+ -j HL --hl-set 64 2>/dev/null || true
-    ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j HL --hl-set 64 2>/dev/null || true
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
+    done
 else
-    ip6tables -t mangle -A FORWARD -i wlan+ -j DROP 2>/dev/null || true
+    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        ip6tables -t mangle -A FORWARD -i "$_if" -j DROP 2>/dev/null || true
+    done
 fi
 
 # 5. Авто-выбор движка подмены IPv4 TTL: Kernel TTL vs Userspace NFQUEUE
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
-    iptables -t mangle -D POSTROUTING -o rmnet+ -j TTL --ttl-set 64 2>/dev/null || true
-    iptables -t mangle -D POSTROUTING -o rmnet_data+ -j TTL --ttl-set 64 2>/dev/null || true
-    iptables -t mangle -D PREROUTING -i wlan+ -j TTL --ttl-set 64 2>/dev/null || true
-
-    iptables -t mangle -A POSTROUTING -o rmnet+ -j TTL --ttl-set 64 2>/dev/null || true
-    iptables -t mangle -A POSTROUTING -o rmnet_data+ -j TTL --ttl-set 64 2>/dev/null || true
-    iptables -t mangle -A PREROUTING -i wlan+ -j TTL --ttl-set 64 2>/dev/null || true
+    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU) для всех сотовых интерфейсов
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        iptables -t mangle -D POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
+        iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
+    done
+    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        iptables -t mangle -D PREROUTING -i "$_if" -j TTL --ttl-set 64 2>/dev/null || true
+        iptables -t mangle -A PREROUTING -i "$_if" -j TTL --ttl-set 64 2>/dev/null || true
+    done
 else
+    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl
     if ! nfqttl_alive; then
         "$MODDIR/nfqttl" -d -s -u
         sleep 2
@@ -100,17 +118,23 @@ else
     iptables -t mangle -F nfqttlo
     iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
-    iptables -t mangle -A POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
-    iptables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
-    iptables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        iptables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
+    done
+    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
+    done
 
     ip6tables -t mangle -N nfqttlo 2>/dev/null || true
     ip6tables -t mangle -F nfqttlo
     ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
-    ip6tables -t mangle -A POSTROUTING -o rmnet+ -j nfqttlo 2>/dev/null || true
-    ip6tables -t mangle -A POSTROUTING -o rmnet_data+ -j nfqttlo 2>/dev/null || true
-    ip6tables -t mangle -A POSTROUTING -o wlan+ -j nfqttlo 2>/dev/null || true
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
+    done
+    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        ip6tables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
+    done
 
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
     WD_INTERVAL=60
