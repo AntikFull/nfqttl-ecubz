@@ -1,0 +1,52 @@
+name: Build and Publish Release Module
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read module metadata
+        id: metadata
+        run: |
+          VERSION=$(grep '^version=' module.prop | cut -d'=' -f2 | tr -d '\r\n')
+          VERSION_CODE=$(grep '^versionCode=' module.prop | cut -d'=' -f2 | tr -d '\r\n')
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "Module Version: $VERSION ($VERSION_CODE)"
+
+      - name: Ensure Unix LF line endings and permissions
+        run: |
+          sudo apt-get update && sudo apt-get install -y dos2unix zip
+          dos2unix service.sh customize.sh module.prop LICENSE README.md 2>/dev/null || true
+          chmod 755 service.sh customize.sh nfqttl
+
+      - name: Package Magisk/KSU Module ZIP
+        run: |
+          ZIP_NAME="nfqttl-${VERSION}.zip"
+          zip -r "$ZIP_NAME" module.prop service.sh customize.sh nfqttl LICENSE README.md
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Nfqttl ${{ env.VERSION }}
+          body_path: README.md
+          files: ${{ env.ZIP_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
