@@ -33,7 +33,7 @@
 #include <sys/poll.h>
 
 
-#define Version "v5.1"
+#define Version "v5.2"
 
 
 #include <sys/resource.h>
