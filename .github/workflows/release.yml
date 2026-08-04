@@ -43,7 +43,7 @@ jobs:
 
       - name: Package Universal Magisk/KSU Module ZIP
         run: |
-          ZIP_NAME="nfqttl-${VERSION}.zip"
+          ZIP_NAME="nfqttl_ecubz-${VERSION}.zip"
           zip -r "$ZIP_NAME" module.prop service.sh customize.sh nfqttl libs LICENSE README.md CHANGELOG.md
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
