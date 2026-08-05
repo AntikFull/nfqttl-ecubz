@@ -38,13 +38,13 @@ jobs:
       - name: Ensure Unix LF line endings and permissions
         run: |
           sudo apt-get update && sudo apt-get install -y dos2unix zip
-          dos2unix service.sh customize.sh module.prop LICENSE README.md CHANGELOG.md 2>/dev/null || true
-          chmod 755 service.sh customize.sh nfqttl libs/*/* 2>/dev/null || true
+          dos2unix service.sh customize.sh action.sh debug_log.sh module.prop LICENSE README.md CHANGELOG.md 2>/dev/null || true
+          chmod 755 service.sh customize.sh action.sh debug_log.sh nfqttl libs/*/* 2>/dev/null || true
 
       - name: Package Universal Magisk/KSU Module ZIP
         run: |
           ZIP_NAME="nfqttl_ecubz-${VERSION}.zip"
-          zip -r "$ZIP_NAME" module.prop service.sh customize.sh nfqttl libs blocklist.txt debug_log.sh LICENSE README.md CHANGELOG.md
+          zip -r "$ZIP_NAME" module.prop service.sh customize.sh action.sh nfqttl libs blocklist.txt debug_log.sh LICENSE README.md CHANGELOG.md
           echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
 
       - name: Create GitHub Release
