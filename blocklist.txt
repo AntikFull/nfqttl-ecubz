@@ -5,4 +5,9 @@
 msftncsi
 msftconnecttest
 time.windows.com
+time.nist.gov
+time.apple.com
+time.google.com
+time.android.com
 captive.apple.com
+connectivitycheck.gstatic.com

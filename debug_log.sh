@@ -48,13 +48,15 @@ echo "net.ipv6.conf.all.disable_ipv6 = $(sysctl -n net.ipv6.conf.all.disable_ipv
 echo "net.ipv6.conf.all.forwarding = $(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null)" >> "$LOGFILE"
 
 echo "" >> "$LOGFILE"
-echo "--- 7. IPTABLES MANGLE RULES WITH PACKET COUNTERS ---" >> "$LOGFILE"
+echo "--- 7. IPTABLES MANGLE & NAT RULES WITH PACKET COUNTERS ---" >> "$LOGFILE"
 echo "[IPv4 Mangle PREROUTING]" >> "$LOGFILE"
 iptables -t mangle -L PREROUTING -n -v >> "$LOGFILE" 2>&1
 echo "[IPv4 Mangle FORWARD]" >> "$LOGFILE"
 iptables -t mangle -L FORWARD -n -v >> "$LOGFILE" 2>&1
 echo "[IPv4 Mangle POSTROUTING]" >> "$LOGFILE"
 iptables -t mangle -L POSTROUTING -n -v >> "$LOGFILE" 2>&1
+echo "[IPv4 NAT PREROUTING (DNS REDIRECT)]" >> "$LOGFILE"
+iptables -t nat -L PREROUTING -n -v >> "$LOGFILE" 2>&1
 
 echo "" >> "$LOGFILE"
 echo "--- 8. IP6TABLES RULES WITH PACKET COUNTERS ---" >> "$LOGFILE"
