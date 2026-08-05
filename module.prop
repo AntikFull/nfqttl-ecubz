@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v6.1
-versionCode=14
+version=v6.2
+versionCode=15
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, OnePlus 13/OxygenOS 15 wlan2 support, PREROUTING TTL=1 & DNS Redirect. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, Tether Hardware Offload bypass, Universal POSTROUTING TTL=64. github: https://github.com/AntikFull/nfqttl-ecubz

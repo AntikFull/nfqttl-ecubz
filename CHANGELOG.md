@@ -1,14 +1,16 @@
 # Список изменений (Changelog)
 
+## Версия v6.2 (Критическое обновление против детекции МТС)
+
+* :rocket: **Отключение Tethering Hardware Offload:** Принудительное отключение аппаратного чипа разгрузки Qualcomm/Oplus (`tether_offload_disabled 1`). Вся раздача принудительно направляется в ядро Linux и `iptables`!
+* :target: **Строгая фиксация TTL=64 в POSTROUTING:** Устранена критическая ошибка с вычитанием 1 из TTL при маршрутизации пакетов (ранее пакетам ошибочно присваивался TTL=63 вместо 64). Теперь TTL=64 выставляется в самый последний момент перед отправкой в вышку МТС!
+* :arrows_counterclockwise: **Принудительное включение IP Forwarding:** Автоматическое включение `net.ipv4.ip_forward=1` и `net.ipv6.conf.all.forwarding=1` при старте службы.
+* :globe_with_meridians: **Универсальная подмена на любые интерфейсы модемов:** Добавлено универсальное резервное правило `POSTROUTING ! -o wlan+`, накрывающее абсолютно любые SIM-карты и модемные модули (`rmnet_data0`, `r_rmnet_data1` и др.).
+
 ## Версия v6.1
 
-* :shield: **Перехват входящего TTL=1 на PREROUTING:** Добавлен безусловный перехват входящих пакетов с TTL=1 от МТС на всех интерфейсах точки доступа (`wlan+`, `ap+`, `swlan+`, `softap+`, `rndis+`, `bt-pan+`). Это предотвращает отправку устройством разоблачающих `ICMP Time Exceeded` отчетов оператору!
-* :lock: **Автоматический DNS REDIRECT (Защита от DNS-детекции):** Запросы портов 53 UDP/TCP с клиентских девайсов принудительно перенаправляются на локальный DNS смартфона (`iptables -t nat -A PREROUTING -j REDIRECT --to-ports 53`), перекрывая DNS-детекцию МТС.
-* :smartphone: **Полный анализ лога OnePlus 13 (Android 15 / OxygenOS):** Добавлена глубинная совместимость с точками доступа `wlan2` и сотовым слотом `rmnet_data0` модемов Qualcomm/Oplus.
-* :clipboard: **Расширенный `blocklist.txt` по умолчанию:** Добавлены домены `time.nist.gov`, `time.apple.com`, `time.google.com`, `time.android.com` и `connectivitycheck.gstatic.com`.
+* :shield: Перехват входящего TTL=1 на PREROUTING и автоматический DNS REDIRECT.
 
 ## Версия v6.0 (Мажорный релиз)
 
-* :zap: **Отладка по дефолту ВЫКЛЮЧЕНА (Zero-overhead):** Память не засирается.
-* :control_knobs: **Кнопка «Действие / Action» в Root-менеджере:** Управление логированием в 1 клик.
-* :rocket: **Поддержка OnePlus (ColorOS / OxygenOS), Realme, Oppo, Xiaomi, MTK и Qualcomm.**
+* :zap: Отладка по дефолту ВЫКЛЮЧЕНА (Zero-overhead). Кнопка «Действие / Action» в Root-менеджере.
