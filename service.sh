@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.6 - EBUSY Retry Guard & Zero-Phone-Latency Tether Routing
+# Nfqttl eCubz v7.7 - Clean Cellular Ingress & Ultimate Tethering Reliability
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v7.6"
-VERSION_CODE="26"
+VERSION="v7.7"
+VERSION_CODE="27"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -89,12 +89,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t nat -D PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
 done
 
-# 4. Перехват/блокировка входящих провокационных TTL=1 пакетов от вышки МТС на сотовых модемах
-for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
-    iptables -t mangle -A PREROUTING -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
-done
-
-# 5. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6
+# 4. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
@@ -105,7 +100,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t mangle -A FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
 done
 
-# 6. Защита от NTP на IPv4 и IPv6
+# 5. Защита от NTP на IPv4 и IPv6
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     if [ "$DEBUG_MODE" -eq 1 ]; then
         iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
@@ -114,7 +109,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
 done
 
-# 7. Динамический парсинг и подгрузка блокировок из blocklist.txt (IPv4 & IPv6)
+# 6. Динамический парсинг и подгрузка блокировок из blocklist.txt (IPv4 & IPv6)
 BLOCKLIST_FILE="$MODDIR/blocklist.txt"
 HAS_IP6_STRING=0
 if grep -q string /proc/net/ip6_tables_matches 2>/dev/null; then
@@ -143,7 +138,7 @@ if [ -f "$BLOCKLIST_FILE" ]; then
     done < "$BLOCKLIST_FILE"
 fi
 
-# 8. Коррекция TCP MSS (заведена на интерфейсы раздачи и модемы)
+# 7. Коррекция TCP MSS (заведена на интерфейсы раздачи и модемы)
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t mangle -A POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
@@ -151,7 +146,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t mangle -A POSTROUTING -o "$_if" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
 
-# 9. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
+# 8. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
         ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
@@ -175,7 +170,7 @@ else
     done
 fi
 
-# 10. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
+# 9. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
@@ -186,7 +181,6 @@ if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     done
 else
     # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl
-    # Сначала запускаем демон, даем ем сокету забиться и открыться
     if ! nfqttl_alive; then
         "$MODDIR/nfqttl" -d
         sleep 1
@@ -197,7 +191,6 @@ else
     iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
     # Направляем в NFQUEUE ТОЛЬКО клиентские интерфейсы раздачи _if!
-    # Собственный трафик смартфона через модемы _celnt вылетает напрямую без задержек!
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
         iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     done
@@ -252,7 +245,7 @@ else
     watchdog &
 fi
 
-# 11. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
+# 10. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
 if [ "$DEBUG_MODE" -eq 1 ]; then
     if [ -f "$MODDIR/debug_log.sh" ]; then
         sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &
