@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v6.3
-versionCode=16
+version=v7.0
+versionCode=20
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, OnePlus 13 NFQUEUE fix & Android 7.1.2 zip compatibility. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, Unconditional C-daemon TTL=64 normalization & eBPF Tethering Offload bypass. github: https://github.com/AntikFull/nfqttl-ecubz

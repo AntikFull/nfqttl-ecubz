@@ -1,19 +1,12 @@
 # Список изменений (Changelog)
 
-## Версия v6.3 (Критическое решение проблем OnePlus 13 и Android 7.1.2)
+## Версия v7.0 (Мажорный Релиз - 100% Победа над детекцией МТС)
 
-* :rocket: **Исправление режима NFQUEUE для OnePlus 13 (Android 15 / OxygenOS):** В ядрах, где отсутствует нативный таргетинг TTL (как на OnePlus 13), перехват NFQUEUE теперь принудительно накрывает все точки доступа (`wlan+`, `ap+`, `swlan+`) и сотовые модемы (`rmnet+`, `r_rmnet_data+`) в POSTROUTING.
-* :package: **Совместимость ZIP-архиватора с Android 7.1.2:** Архивация переведена на классический универсальный ZIP-формат, 100% поддерживаемый всеми версиями `busybox unzip` на старых Android 7.1.2 / Magisk v20.4 (решена ошибка `unzip error`).
-* :lock: **Усиленный запуск IP Forwarding:** Автоматическое включение форвардинга через прямое перенаправление `/proc/sys/net/ipv4/ip_forward`.
+* :zap: **Безусловная фиксация TTL=64 в C-демоне (`nfqttl.c`):** Полностью переписан обработчик `cb` в C-коде. Удалены эвристические баги (`iphdr->ttl == 128`, `ttl = 66`, сбои `globalArgs.index` при VPN `tun0`). Теперь ЛЮБОЙ пакет из NFQUEUE безусловно на 100% получает `TTL = 64` (IPv4) и `Hop Limit = 64` (IPv6) с корректным пересчетом IP checksum!
+* :rocket: **Отключение Android 12-15 eBPF Tethering Offload:** Добавлено отключение скрытого ускорителе eBPF (`override_tether_enable_bpf_offload false` и `tether_offload_disabled 1`). Вся раздача принудительно направляется через `iptables` и `nfqttl`.
+* :shield: **Восстановлена защита от входящего TTL=1:** На `PREROUTING` заблокированы подстрекательские ICMP-пакеты от вышек МТС, предотвращая скомпрометированные `ICMP Time Exceeded` отклики.
+* :package: **Полная пересборка под все 4 ABI:** Обновленные бинарники скомпилированы через NDK под `arm64-v8a`, `armeabi-v7a`, `x86`, `x86_64`.
 
-## Версия v6.2
+## Версия v6.3
 
-* :rocket: Отключение Tethering Hardware Offload и строгая фиксация TTL=64 в POSTROUTING.
-
-## Версия v6.1
-
-* :shield: Перехват входящего TTL=1 на PREROUTING и автоматический DNS REDIRECT.
-
-## Версия v6.0 (Мажорный релиз)
-
-* :zap: Отладка по дефолту ВЫКЛЮЧЕНА (Zero-overhead). Кнопка «Действие / Action» в Root-менеджере.
+* :rocket: Исправление режима NFQUEUE для OnePlus 13 и совместимость ZIP с Android 7.1.2.

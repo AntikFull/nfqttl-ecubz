@@ -364,96 +364,62 @@ int print_route(struct nlmsghdr *n, void *arg)
         return 0;
 }
 
+void nfq_ip_set_checksum(struct iphdr *iph) {
+	iph->check = 0;
+	uint32_t sum = 0;
+	uint16_t *ptr = (uint16_t *)iph;
+	int len = iph->ihl * 4;
+	for (int i = 0; i < len / 2; i++) {
+		sum += ptr[i];
+	}
+	while (sum >> 16) {
+		sum = (sum & 0xffff) + (sum >> 16);
+	}
+	iph->check = (uint16_t)(~sum);
+}
+
 static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
               struct nfq_data *nfa, void *data)
 {
-
 	int id = 0;
-        struct nfqnl_msg_packet_hdr *ph;
-        ph = nfq_get_msg_packet_hdr(nfa);
-	uint32_t iout = nfq_get_outdev (nfa);
-	uint32_t iin = nfq_get_indev (nfa);
-	uint32_t mark = nfq_get_nfmark(nfa);
+	struct nfqnl_msg_packet_hdr *ph = nfq_get_msg_packet_hdr(nfa);
 	uint8_t *newdata;
 	int len = nfq_get_payload(nfa, &newdata);
-	int ret = 0;
 
+	if (!ph) return 0;
+	id = ntohl(ph->packet_id);
 
-
-	if(poll(globalArgs.if_fd, 1, 0)|| globalArgs.index == 0){
-
-		globalArgs.index = 0;
-		globalArgs.interfacename[0] = 0;
-
-	        if (rtnl_routedump_req(&globalArgs.rth, AF_INET, iproute_dump_filter) < 0) {
-    		        perror("Cannot send dump request");
-    		}
-	        if (rtnl_dump_filter_nc(&globalArgs.rth, print_route, stdout, 0) < 0) {
-    		        fprintf(stderr, "Dump terminated\n");
-	        }
-		for( int i = 0 ; i <= 255 ; i++){
-			countPacket[i].addr = 0;
-		}
-		nlif_query(globalArgs.h);
-		nlif_catch(globalArgs.h);
-		nlif_index2name(globalArgs.h, globalArgs.index, globalArgs.interfacename);
-		printf("name index ttl iout iin %s %u %hhu %u %u\n", globalArgs.interfacename, globalArgs.index, globalArgs.ttl, iout, iin);
+	if (len <= 0 || newdata == NULL) {
+		return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
 	}
 
-	if (ph) {
-		id = ntohl(ph->packet_id);
-		/* Повреждённые/неполные сообщения пропускаем без обращения к заголовкам. */
-		if (len <= 0 || newdata == NULL) {
+	uint8_t target_ttl = globalArgs.ttl ? globalArgs.ttl : 64;
+
+	if (ntohs(ph->hw_protocol) == 0x0800) { // IPv4
+		if (len < (int)sizeof(struct iphdr)) {
 			return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-	        } else if (len > globalArgs.sizepacket) {
-                        ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-                } else if(globalArgs.index){
-			if(ntohs(ph->hw_protocol) == 0x0800){
-				if (len < (int)sizeof(struct iphdr))
-					return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-				struct iphdr *iphdr = (struct iphdr *) newdata;
-				if (iphdr->ihl < 5 || (size_t)iphdr->ihl * 4 > (size_t)len)
-					return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-				if(iin){
-					if (iin == globalArgs.index){
-						if(iphdr->ttl == 1 && globalArgs.ttl == globalArgs.ttlwan){
-		    					iphdr->ttl = globalArgs.ttl;
-							nfq_ip_set_checksum(iphdr);
-							ret = nfq_set_verdict(qh, id, NF_ACCEPT, len, newdata);
-						}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-					}else if (iin != globalArgs.index){
-						if(iphdr->ttl == globalArgs.ttlwan || iphdr->ttl == 128){
-							if(splittcp(newdata, len, &mark, 0)){
-								ret = nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
-							}else if(!globalArgs.mark || (globalArgs.mark && mark != globalArgs.mark)){
-								iphdr->ttl = globalArgs.ttl == globalArgs.ttllan ? 66 : globalArgs.ttllan;
-								nfq_ip_set_checksum(iphdr);
-								ret = nfq_set_verdict(qh, id, NF_ACCEPT, len, newdata);
-							}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-						}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-					}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-				}else if(iout == globalArgs.index){
-					if(iphdr->ttl == globalArgs.ttlwan){
-						if(splittcp(newdata, len, &mark, iout)){
-							ret = nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
-						}else if(!globalArgs.mark || (globalArgs.mark && mark != globalArgs.mark)){
-							iphdr->ttl = globalArgs.ttl;
-							nfq_ip_set_checksum(iphdr);
-							ret = nfq_set_verdict(qh, id, NF_ACCEPT, len, newdata);
-						}else ret = nfq_set_verdict2(qh, id, NF_ACCEPT, mark, 0, NULL);
-					}else ret = nfq_set_verdict2(qh, id, NF_ACCEPT, mark, 0, NULL);
-				}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-			}else if(ntohs(ph->hw_protocol) == 0x86dd){
-				if (len < (int)sizeof(struct ip6_hdr))
-					return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-				struct ip6_hdr *ip6hdr = (struct ip6_hdr *) newdata;
-				if(iout == globalArgs.index && ip6hdr->ip6_hops != globalArgs.ttl){
-					ret = nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
-				}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, len, newdata);
-			}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
-		}else ret = nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+		}
+		struct iphdr *iphdr = (struct iphdr *) newdata;
+		if (iphdr->ihl < 5 || (size_t)iphdr->ihl * 4 > (size_t)len) {
+			return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+		}
+
+		// Безусловная фиксация TTL = 64 для всех пакетов из NFQUEUE
+		iphdr->ttl = target_ttl;
+		nfq_ip_set_checksum(iphdr);
+		return nfq_set_verdict(qh, id, NF_ACCEPT, len, newdata);
+	} else if (ntohs(ph->hw_protocol) == 0x86dd) { // IPv6
+		if (len < (int)sizeof(struct ip6_hdr)) {
+			return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+		}
+		struct ip6_hdr *ip6hdr = (struct ip6_hdr *) newdata;
+
+		// Безусловная фиксация Hop Limit = 64 для всех пакетов IPv6
+		ip6hdr->ip6_hops = target_ttl;
+		return nfq_set_verdict(qh, id, NF_ACCEPT, len, newdata);
 	}
-	return ret;
+
+	return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
 }
 int changeuid(){
 
