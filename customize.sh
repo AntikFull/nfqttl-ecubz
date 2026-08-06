@@ -3,27 +3,30 @@ SKIPUNZIP=0
 ui_print " "
 ui_print " ******************************* "
 ui_print " *  Magisk Module Nfqttl eCubz   * "
-ui_print " *        Version v7.0         * "
+ui_print " *        Version v7.1         * "
 ui_print " ******************************* "
 ui_print " "
 
 # Определение архитектуры устройства
 ABI=$(getprop ro.product.cpu.abi)
-ui_print "- Архитектура процессора: $ABI"
+ui_print "- Архитектура процессора устройства: $ABI"
 
-if [ -f "$ZIPFILE" ]; then
-    case "$ABI" in
-        arm64-v8a*) ARCH_DIR="arm64-v8a" ;;
-        armeabi-v7a*|armeabi*) ARCH_DIR="armeabi-v7a" ;;
-        x86_64*) ARCH_DIR="x86_64" ;;
-        x86*) ARCH_DIR="x86" ;;
-        *) ARCH_DIR="arm64-v8a" ;;
-    esac
+case "$ABI" in
+    arm64-v8a*) ARCH_DIR="arm64-v8a" ;;
+    armeabi-v7a*|armeabi*) ARCH_DIR="armeabi-v7a" ;;
+    x86_64*) ARCH_DIR="x86_64" ;;
+    x86*) ARCH_DIR="x86" ;;
+    *) ARCH_DIR="arm64-v8a" ;;
+esac
 
-    if [ -f "$MODPATH/libs/$ARCH_DIR/nfqttl" ]; then
-        ui_print "- Установка скомпилированного бинарника под $ARCH_DIR..."
-        cp "$MODPATH/libs/$ARCH_DIR/nfqttl" "$MODPATH/nfqttl"
-    fi
+TARGET_BIN="$MODPATH/libs/$ARCH_DIR/nfqttl"
+
+if [ -f "$TARGET_BIN" ]; then
+    ui_print "- Копирование бинарника для $ARCH_DIR..."
+    cp "$TARGET_BIN" "$MODPATH/nfqttl"
+else
+    ui_print "- [ВНИМАНИЕ] Бинарник под $ARCH_DIR в папке libs не найден!"
+    ui_print "- Используем корневой резервный бинарник nfqttl..."
 fi
 
 # Установка прав на исполнение скриптов и бинарников

@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v7.0
-versionCode=20
+version=v7.1
+versionCode=21
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Unconditional C-daemon TTL=64 normalization & eBPF Tethering Offload bypass. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, Pure C binary (no libstdc++), Cellular PREROUTING TTL=1 & IPv6 NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz

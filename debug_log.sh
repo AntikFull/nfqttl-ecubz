@@ -47,6 +47,7 @@ echo "net.ipv4.ip_forward = $(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || s
 echo "net.ipv6.conf.all.disable_ipv6 = $(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" >> "$LOGFILE"
 echo "net.ipv6.conf.all.forwarding = $(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null)" >> "$LOGFILE"
 echo "tether_offload_disabled = $(settings get global tether_offload_disabled 2>/dev/null || echo unknown)" >> "$LOGFILE"
+echo "override_tether_enable_bpf_offload = $(device_config get connectivity override_tether_enable_bpf_offload 2>/dev/null || echo unknown)" >> "$LOGFILE"
 
 echo "" >> "$LOGFILE"
 echo "--- 7. IPTABLES MANGLE & NAT RULES WITH PACKET COUNTERS ---" >> "$LOGFILE"
@@ -86,8 +87,10 @@ fi
 
 echo "" >> "$LOGFILE"
 echo "--- 11. BLOCKED SUSPICIOUS TRAFFIC TRACE (DMESG) ---" >> "$LOGFILE"
-dmesg 2>/dev/null | grep -E "NFQTTL-BLOCK|NFQTTL-NTP-BLOCK" | tail -n 50 >> "$LOGFILE" 2>&1
-if [ $? -ne 0 ] || [ ! -s "$LOGFILE" ]; then
+DMESG_TRACE=$(dmesg 2>/dev/null | grep -E "NFQTTL-BLOCK|NFQTTL-NTP-BLOCK" | tail -n 50)
+if [ -n "$DMESG_TRACE" ]; then
+    echo "$DMESG_TRACE" >> "$LOGFILE"
+else
     echo "No suspicious traffic trace found in kernel dmesg log" >> "$LOGFILE"
 fi
 

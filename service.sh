@@ -2,7 +2,7 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.0 - Ultimate Unconditional TTL=64 & eBPF Offload Bypass
+# Nfqttl eCubz v7.1 - Pure C TTL=64, Cellular PREROUTING & IPv6 NFQUEUE Engine
 # Compatible with: OnePlus 13 (Android 15 / OxygenOS), Android 7.0 - Android 16
 # ============================================================================
 
@@ -51,14 +51,13 @@ iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --cla
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
+    iptables -t mangle -D PREROUTING -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
     ip6tables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
 done
 
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t mangle -D POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
-    iptables -t mangle -D PREROUTING -i "$_if" -p icmp -j DROP 2>/dev/null || true
-    iptables -t mangle -D PREROUTING -i "$_if" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
     iptables -t nat -D PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
@@ -69,9 +68,9 @@ done
 ip6tables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
 
-# 3. Перехват/блокировка входящих провокационных TTL=1 пакетов от МТС на точках раздачи
-for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-    iptables -t mangle -A PREROUTING -i "$_if" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
+# 3. Перехват/блокировка входящих провокационных TTL=1 пакетов от вышки МТС на сотовых модемах
+for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+    iptables -t mangle -A PREROUTING -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
 done
 
 # 4. REDIRECT DNS-запросов клиентов раздачи на локальный DNS (Защита от DNS-детекции МТС)
@@ -110,14 +109,22 @@ fi
 # 7. Коррекция TCP MSS (защита от детекции размера TCP окна ПК)
 iptables -t mangle -A POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-# 8. Безопасная обработка IPv6 (Защита от утечки IPv6 TTL на раздаче)
+# 8. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
         ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
     done
 else
+    # Режим NFQUEUE для IPv6 Hop Limit = 64
+    ip6tables -t mangle -N nfqttlo 2>/dev/null || true
+    ip6tables -t mangle -F nfqttlo
+    ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
+
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
+    done
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-        ip6tables -t mangle -A FORWARD -i "$_if" -j DROP 2>/dev/null || true
+        ip6tables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     done
 fi
 
@@ -134,7 +141,7 @@ if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
 else
     # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Например, OnePlus 13 / OxygenOS 15)
     if ! nfqttl_alive; then
-        "$MODDIR/nfqttl" -d -s -u
+        "$MODDIR/nfqttl" -d
         sleep 2
     fi
 
@@ -149,14 +156,6 @@ else
         iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     done
     iptables -t mangle -A POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
-
-    ip6tables -t mangle -N nfqttlo 2>/dev/null || true
-    ip6tables -t mangle -F nfqttlo
-    ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
-
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
-        ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
-    done
 
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
     WD_INTERVAL=60
@@ -184,7 +183,7 @@ else
 
             restarts=$((restarts + 1))
             wd_log "демон не найден, перезапуск #$restarts"
-            "$MODDIR/nfqttl" -d -s -u
+            "$MODDIR/nfqttl" -d
             sleep 3
         done
     }
