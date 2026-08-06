@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.7 - Clean Cellular Ingress & Ultimate Tethering Reliability
+# Nfqttl eCubz v7.8 - Anti-MTS TTL=1 Probe Protection (ICMP Time Exceeded Drop)
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v7.7"
-VERSION_CODE="27"
+VERSION="v7.8"
+VERSION_CODE="28"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -48,7 +48,7 @@ if [ -f "$MODDIR/debug" ] || [ -f "$MODDIR/DEBUG" ]; then
     DEBUG_MODE=1
 fi
 
-# 3. Полная и симметричная очистка старых правил MANGLE, NAT и унаследованных правил
+# 3. Полная и симметричная очистка старых правил MANGLE, FILTER, NAT и унаследованных правил
 iptables -t mangle -F nfqttlo 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
@@ -61,9 +61,12 @@ for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
     iptables -t mangle -D PREROUTING -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
+    iptables -t filter -D OUTPUT -o "$_celnt" -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true
 
     ip6tables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
     ip6tables -t mangle -D POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
+    ip6tables -t filter -D OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
 done
 
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
@@ -89,7 +92,16 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t nat -D PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
 done
 
-# 4. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6
+# 4. ЗАЩИТА ОТ ДЕТЕКЦИИ МТС TTL=1:
+# МТС выдает детекцию раздачи, когда смартфон при форвардинге TTL=1 пакета отправляет вышке ответ ICMP Time Exceeded (Type 11)!
+# Мы блокируем уходящие ответы ICMP Time Exceeded на сотовые модемы и режем пробы TTL=1 исключительно в FORWARD!
+for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+    iptables -t filter -A OUTPUT -o "$_celnt" -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true
+    ip6tables -t filter -A OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
+    iptables -t mangle -A FORWARD -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
+done
+
+# 5. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
@@ -100,7 +112,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t mangle -A FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
 done
 
-# 5. Защита от NTP на IPv4 и IPv6
+# 6. Защита от NTP на IPv4 и IPv6
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     if [ "$DEBUG_MODE" -eq 1 ]; then
         iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
@@ -109,7 +121,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
 done
 
-# 6. Динамический парсинг и подгрузка блокировок из blocklist.txt (IPv4 & IPv6)
+# 7. Динамический парсинг и подгрузка блокировок из blocklist.txt (IPv4 & IPv6)
 BLOCKLIST_FILE="$MODDIR/blocklist.txt"
 HAS_IP6_STRING=0
 if grep -q string /proc/net/ip6_tables_matches 2>/dev/null; then
@@ -138,7 +150,7 @@ if [ -f "$BLOCKLIST_FILE" ]; then
     done < "$BLOCKLIST_FILE"
 fi
 
-# 7. Коррекция TCP MSS (заведена на интерфейсы раздачи и модемы)
+# 8. Коррекция TCP MSS (заведена на интерфейсы раздачи и модемы)
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t mangle -A POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
@@ -146,7 +158,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t mangle -A POSTROUTING -o "$_if" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
 
-# 8. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
+# 9. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
         ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
@@ -170,7 +182,7 @@ else
     done
 fi
 
-# 9. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
+# 10. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
@@ -245,7 +257,7 @@ else
     watchdog &
 fi
 
-# 10. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
+# 11. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
 if [ "$DEBUG_MODE" -eq 1 ]; then
     if [ -f "$MODDIR/debug_log.sh" ]; then
         sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &

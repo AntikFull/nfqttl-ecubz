@@ -1,7 +1,7 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v7.7
-versionCode=27
+version=v7.8
+versionCode=28
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Clean Ingress, EBUSY Socket Retry & Pure C NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, ICMP Time Exceeded MTS Bypass, FORWARD TTL=1 Guard & Pure C NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz
 
