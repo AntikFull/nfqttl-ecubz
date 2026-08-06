@@ -2,7 +2,7 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.2 - Precise Tethering Scope Fix (No phone traffic hijacking)
+# Nfqttl eCubz v7.3 - Continuous IP Forward & Offload Watchdog Guard
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
@@ -157,8 +157,8 @@ else
     done
 
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
-    WD_INTERVAL=60
-    WD_MAX_RESTARTS=20
+    WD_INTERVAL=20
+    WD_MAX_RESTARTS=50
 
     wd_log() {
         if [ -f "$WD_LOG" ] && [ "$(wc -c < "$WD_LOG" 2>/dev/null || echo 0)" -gt 65536 ]; then
@@ -169,9 +169,13 @@ else
 
     watchdog() {
         restarts=0
-        wd_log "watchdog запущен (интервал ${WD_INTERVAL}с, лимит ${WD_MAX_RESTARTS} перезапусков)"
+        wd_log "watchdog запущен (авто-контроль ip_forward и процесса nfqttl, интервал ${WD_INTERVAL}с)"
         while true; do
             sleep "$WD_INTERVAL"
+
+            # Автоматическое удержание форвардинга ядра при переключении точки раздачи Android
+            echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+            echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
 
             nfqttl_alive && continue
 
@@ -183,7 +187,7 @@ else
             restarts=$((restarts + 1))
             wd_log "демон не найден, перезапуск #$restarts"
             "$MODDIR/nfqttl" -d
-            sleep 3
+            sleep 2
         done
     }
 
