@@ -2,8 +2,8 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v6.2 - Absolute Tethering Fix & Hardware Offload Bypass Engine
-# Compatible with: OnePlus 13 (Android 15 / OxygenOS), Realme, Xiaomi, Samsung
+# Nfqttl eCubz v6.3 - Universal NFQUEUE & Kernel TTL Engine Fix
+# Compatible with: OnePlus 13 (Android 15 / OxygenOS), Android 7.1.2 - 16
 # ============================================================================
 
 PGREP_BIN=/system/bin/pgrep
@@ -25,8 +25,10 @@ nfqttl_alive() {
 settings put global tether_offload_disabled 1 2>/dev/null || true
 setprop persist.sys.tether.offload.enable false 2>/dev/null || true
 
-# 2. Включение форвардинга IPv4 и IPv6
+# 2. Принудительное включение форвардинга IPv4 и IPv6
+echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
 sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
 sysctl -w net.ipv6.conf.all.forwarding=1 2>/dev/null || true
 sysctl -w net.ipv6.conf.all.disable_ipv6=0 2>/dev/null || true
 
@@ -47,11 +49,13 @@ iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --cla
 
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
+    iptables -t mangle -D POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     ip6tables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
 done
 
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t mangle -D POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
+    iptables -t mangle -D POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D PREROUTING -i "$_if" -j nfqttlo 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
@@ -110,17 +114,18 @@ else
     done
 fi
 
-# 8. Фиксация и подмена IPv4 TTL: Kernel TTL vs Userspace NFQUEUE
+# 8. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
-    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU) - выставляем TTL=64 strictly on POSTROUTING
+    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
-        iptables -t mangle -D POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
         iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     done
-    # Резервное правило POSTROUTING для всех выходящих пакетов сотового модема
-    iptables -t mangle -A POSTROUTING ! -o wlan+ ! -o ap+ ! -o swlan+ ! -o softap+ ! -o rndis+ ! -o usb+ ! -o bt-pan+ ! -o pan+ ! -o lo -j TTL --ttl-set 64 2>/dev/null || true
+    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        iptables -t mangle -A POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
+    done
+    iptables -t mangle -A POSTROUTING ! -o lo -j TTL --ttl-set 64 2>/dev/null || true
 else
-    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Вызовы строго в POSTROUTING!)
+    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Например, OnePlus 13 / OxygenOS)
     if ! nfqttl_alive; then
         "$MODDIR/nfqttl" -d -s -u
         sleep 2
@@ -133,8 +138,11 @@ else
     for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
         iptables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
     done
-    # Универсальное правило POSTROUTING для любых мобильных карт и реверсивных модемов (r_rmnet_data)
-    iptables -t mangle -A POSTROUTING ! -o wlan+ ! -o ap+ ! -o swlan+ ! -o softap+ ! -o rndis+ ! -o usb+ ! -o bt-pan+ ! -o pan+ ! -o lo -j nfqttlo 2>/dev/null || true
+    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
+    done
+    # Резервный перехват для всех сетевых пакетов на POSTROUTING
+    iptables -t mangle -A POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
 
     ip6tables -t mangle -N nfqttlo 2>/dev/null || true
     ip6tables -t mangle -F nfqttlo
