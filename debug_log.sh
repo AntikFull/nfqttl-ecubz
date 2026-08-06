@@ -42,10 +42,11 @@ echo "--- 5. ACTIVE NETWORK INTERFACES ---" >> "$LOGFILE"
 ip link show >> "$LOGFILE" 2>&1 || ifconfig >> "$LOGFILE" 2>&1
 
 echo "" >> "$LOGFILE"
-echo "--- 6. IP FORWARDING & IPV6 SYSCTL SETTINGS ---" >> "$LOGFILE"
-echo "net.ipv4.ip_forward = $(sysctl -n net.ipv4.ip_forward 2>/dev/null)" >> "$LOGFILE"
+echo "--- 6. IP FORWARDING & TETHER OFFLOAD SETTINGS ---" >> "$LOGFILE"
+echo "net.ipv4.ip_forward = $(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null || sysctl -n net.ipv4.ip_forward 2>/dev/null)" >> "$LOGFILE"
 echo "net.ipv6.conf.all.disable_ipv6 = $(sysctl -n net.ipv6.conf.all.disable_ipv6 2>/dev/null)" >> "$LOGFILE"
 echo "net.ipv6.conf.all.forwarding = $(sysctl -n net.ipv6.conf.all.forwarding 2>/dev/null)" >> "$LOGFILE"
+echo "tether_offload_disabled = $(settings get global tether_offload_disabled 2>/dev/null || echo unknown)" >> "$LOGFILE"
 
 echo "" >> "$LOGFILE"
 echo "--- 7. IPTABLES MANGLE & NAT RULES WITH PACKET COUNTERS ---" >> "$LOGFILE"
@@ -55,6 +56,8 @@ echo "[IPv4 Mangle FORWARD]" >> "$LOGFILE"
 iptables -t mangle -L FORWARD -n -v >> "$LOGFILE" 2>&1
 echo "[IPv4 Mangle POSTROUTING]" >> "$LOGFILE"
 iptables -t mangle -L POSTROUTING -n -v >> "$LOGFILE" 2>&1
+echo "[IPv4 Mangle NFQTTLO CHAIN]" >> "$LOGFILE"
+iptables -t mangle -L nfqttlo -n -v >> "$LOGFILE" 2>&1
 echo "[IPv4 NAT PREROUTING (DNS REDIRECT)]" >> "$LOGFILE"
 iptables -t nat -L PREROUTING -n -v >> "$LOGFILE" 2>&1
 
