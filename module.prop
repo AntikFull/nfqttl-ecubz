@@ -1,6 +1,7 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v7.5
-versionCode=25
+version=v7.6
+versionCode=26
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Precise Native TTL Scoping, Fixed Debug Logging & Self-Healing Watchdog. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, EBUSY Socket Retry, Zero-Latency Phone Routing & Pure C NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz
+

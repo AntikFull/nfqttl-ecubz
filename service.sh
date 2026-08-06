@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.5 - Fixed Native TTL Scoping & Correct Watchdog Recovery
+# Nfqttl eCubz v7.6 - EBUSY Retry Guard & Zero-Phone-Latency Tether Routing
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v7.5"
-VERSION_CODE="25"
+VERSION="v7.6"
+VERSION_CODE="26"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -48,7 +48,7 @@ if [ -f "$MODDIR/debug" ] || [ -f "$MODDIR/DEBUG" ]; then
     DEBUG_MODE=1
 fi
 
-# 3. Полная и симметричная очистка старых правил MANGLE, NAT и старых унаследованных правил
+# 3. Полная и симметричная очистка старых правил MANGLE, NAT и унаследованных правил
 iptables -t mangle -F nfqttlo 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
@@ -71,11 +71,12 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     iptables -t mangle -D POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_if" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 
-    # Точное удаление дублей ip6tables для _if
+    iptables -t mangle -D FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_if" -j nfqttlo 2>/dev/null || true
+
     ip6tables -t mangle -D POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     ip6tables -t mangle -D POSTROUTING -o "$_if" -j HL --hl-set 64 2>/dev/null || true
 
-    # Очистка дропов и редиректов IPv4 & IPv6
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
@@ -93,14 +94,12 @@ for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+
     iptables -t mangle -A PREROUTING -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
 done
 
-# 5. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6 (Принудительный откат на обычный DNS)
+# 5. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6
 for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-    # IPv4 DNS & DoT
     iptables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t mangle -A FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
 
-    # IPv6 DNS & DoT (если поддерживается ip6tables nat)
     ip6tables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     ip6tables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     ip6tables -t mangle -A FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
@@ -128,7 +127,6 @@ if [ -f "$BLOCKLIST_FILE" ]; then
         [ -z "$domain" ] && continue
 
         for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-            # IPv4 Blocklist
             iptables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
             iptables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
 
@@ -137,7 +135,6 @@ if [ -f "$BLOCKLIST_FILE" ]; then
             fi
             iptables -t mangle -A FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
 
-            # IPv6 Blocklist (если поддерживается ядром)
             if [ "$HAS_IP6_STRING" -eq 1 ]; then
                 ip6tables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
                 ip6tables -t mangle -A FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
@@ -146,7 +143,7 @@ if [ -f "$BLOCKLIST_FILE" ]; then
     done < "$BLOCKLIST_FILE"
 fi
 
-# 8. Коррекция TCP MSS (заведена исключительно на интерфейсы раздачи и сотовые модемы)
+# 8. Коррекция TCP MSS (заведена на интерфейсы раздачи и модемы)
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t mangle -A POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
@@ -164,13 +161,15 @@ if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
     done
 else
     # Режим NFQUEUE для IPv6 Hop Limit = 64
+    if ! nfqttl_alive; then
+        "$MODDIR/nfqttl" -d
+        sleep 1
+    fi
+
     ip6tables -t mangle -N nfqttlo 2>/dev/null || true
     ip6tables -t mangle -F nfqttlo
     ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
-        ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
-    done
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
         ip6tables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     done
@@ -186,19 +185,19 @@ if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
         iptables -t mangle -A POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
     done
 else
-    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Строго для сотовых модемов и точек раздачи)
+    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl
+    # Сначала запускаем демон, даем ем сокету забиться и открыться
     if ! nfqttl_alive; then
         "$MODDIR/nfqttl" -d
-        sleep 2
+        sleep 1
     fi
 
     iptables -t mangle -N nfqttlo 2>/dev/null || true
     iptables -t mangle -F nfqttlo
     iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
-        iptables -t mangle -A POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
-    done
+    # Направляем в NFQUEUE ТОЛЬКО клиентские интерфейсы раздачи _if!
+    # Собственный трафик смартфона через модемы _celnt вылетает напрямую без задержек!
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
         iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     done
@@ -222,16 +221,13 @@ else
         while true; do
             sleep "$WD_INTERVAL"
 
-            # 1. Автоматическое удержание форвардинга ядра при переключении сети Android
             echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
             echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
 
-            # 2. Если демон работает штатно — проверяем "усталость" перезапусков
             if nfqttl_alive; then
                 now=$(date +%s 2>/dev/null || echo 0)
                 if [ "$now" -gt 0 ] && [ "$last_restart_time" -gt 0 ]; then
                     elapsed=$((now - last_restart_time))
-                    # Если проработал стабильно дольше 10 минут (600 секунд) — сбрасываем счетчик рестартов
                     if [ "$elapsed" -ge 600 ] && [ "$restarts" -gt 0 ]; then
                         wd_log "демон стабилен 10+ минут с момента последнего рестарта — сброс счетчика с $restarts до 0"
                         restarts=0
@@ -240,7 +236,6 @@ else
                 continue
             fi
 
-            # 3. Если демон не найден
             if [ "$restarts" -ge "$WD_MAX_RESTARTS" ]; then
                 wd_log "демон мёртв, лимит перезапусков исчерпан — прекращаю попытки"
                 break

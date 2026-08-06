@@ -707,9 +707,15 @@ int main(int argc, char **argv)
 
 	printf("binding this socket to queue '%u'\nchange ttl to '%hhu'\nSplit tcp package '%i'\n",
 		globalArgs.queue_num, globalArgs.ttlwan, globalArgs.splittcp);
-	qh = nfq_create_queue(h, globalArgs.queue_num, &cb, NULL);
+
+	for (int retry = 0; retry < 10; retry++) {
+		qh = nfq_create_queue(h, globalArgs.queue_num, &cb, NULL);
+		if (qh) break;
+		usleep(200000); // 200ms задержка на освобождение сокета ядром EBUSY
+	}
+
 	if (!qh) {
-		fprintf(stderr, "error during nfq_create_queue()\n");
+		fprintf(stderr, "error during nfq_create_queue(): socket busy or kernel ref rejected\n");
 		exit(1);
 	}
 
