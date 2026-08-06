@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.4 - Full IPv6 Parity, Precise Scoping & Self-Healing Guard
+# Nfqttl eCubz v7.5 - Fixed Native TTL Scoping & Correct Watchdog Recovery
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v7.4"
-VERSION_CODE="24"
+VERSION="v7.5"
+VERSION_CODE="25"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -183,7 +183,7 @@ if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
         iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     done
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-        iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
+        iptables -t mangle -A POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
     done
 else
     # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Строго для сотовых модемов и точек раздачи)
@@ -216,7 +216,7 @@ else
 
     watchdog() {
         restarts=0
-        last_healthy_time=$(date +%s 2>/dev/null || echo 0)
+        last_restart_time=$(date +%s 2>/dev/null || echo 0)
         wd_log "watchdog запущен (авто-сброс усталости, контроль ip_forward, интервал ${WD_INTERVAL}с)"
 
         while true; do
@@ -229,15 +229,14 @@ else
             # 2. Если демон работает штатно — проверяем "усталость" перезапусков
             if nfqttl_alive; then
                 now=$(date +%s 2>/dev/null || echo 0)
-                if [ "$now" -gt 0 ] && [ "$last_healthy_time" -gt 0 ]; then
-                    elapsed=$((now - last_healthy_time))
+                if [ "$now" -gt 0 ] && [ "$last_restart_time" -gt 0 ]; then
+                    elapsed=$((now - last_restart_time))
                     # Если проработал стабильно дольше 10 минут (600 секунд) — сбрасываем счетчик рестартов
                     if [ "$elapsed" -ge 600 ] && [ "$restarts" -gt 0 ]; then
-                        wd_log "демон стабилен 10+ минут — сброс счетчика перезапусков с $restarts до 0"
+                        wd_log "демон стабилен 10+ минут с момента последнего рестарта — сброс счетчика с $restarts до 0"
                         restarts=0
                     fi
                 fi
-                last_healthy_time=$(date +%s 2>/dev/null || echo 0)
                 continue
             fi
 
@@ -248,6 +247,7 @@ else
             fi
 
             restarts=$((restarts + 1))
+            last_restart_time=$(date +%s 2>/dev/null || echo 0)
             wd_log "демон не найден, перезапуск #$restarts"
             "$MODDIR/nfqttl" -d
             sleep 2

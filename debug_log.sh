@@ -1,6 +1,9 @@
 #!/system/bin/sh
 MODDIR=${0%/*}
 
+LOGFILE="$MODDIR/nfqttl_debug.log"
+exec > "$LOGFILE" 2>&1
+
 echo "=================================================================="
 echo " Nfqttl eCubz Deep Diagnostic & Trace Log"
 echo " Date: $(date '+%Y-%m-%d %H:%M:%S')"
@@ -30,7 +33,7 @@ fi
 
 # Проверка устаревших правила catch-all (!lo)
 if iptables -t mangle -L POSTROUTING -n -v 2>/dev/null | grep -q "!lo"; then
-    echo "⚠️ [ВНИМАНИЕ] В iptables висит устаревшее правило !lo — служба v7.4 еще не перезапущена! Сделайте reboot."
+    echo "⚠️ [ВНИМАНИЕ] В iptables висит устаревшее правило !lo — служба v7.5 еще не перезапущена! Сделайте reboot."
 fi
 
 echo "Device Model: $(getprop ro.product.model)"
@@ -149,5 +152,7 @@ dmesg 2>/dev/null | grep -E "NFQTTL-BLOCK|NFQTTL-NTP-BLOCK" | tail -n 20 || echo
 echo ""
 
 echo "=================================================================="
-echo " Deep Diagnostic Report Complete"
+echo " Deep Diagnostic Report Complete: $LOGFILE"
 echo "=================================================================="
+
+chmod 666 "$LOGFILE" 2>/dev/null || true
