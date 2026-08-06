@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.8 - Anti-MTS TTL=1 Probe Protection (ICMP Time Exceeded Drop)
+# Nfqttl eCubz v7.9 - Sniper FORWARD NFQUEUE Scoping & Clean Cellular Ingress
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v7.8"
-VERSION_CODE="28"
+VERSION="v7.9"
+VERSION_CODE="29"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -62,10 +62,12 @@ for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+
     iptables -t mangle -D POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
     iptables -t mangle -D PREROUTING -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
+    iptables -t mangle -D FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
     iptables -t filter -D OUTPUT -o "$_celnt" -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true
 
     ip6tables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
     ip6tables -t mangle -D POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
+    ip6tables -t mangle -D FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
     ip6tables -t filter -D OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
 done
 
@@ -76,6 +78,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
 
     iptables -t mangle -D FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -j nfqttlo 2>/dev/null || true
+    ip6tables -t mangle -D FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
 
     ip6tables -t mangle -D POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     ip6tables -t mangle -D POSTROUTING -o "$_if" -j HL --hl-set 64 2>/dev/null || true
@@ -93,8 +96,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
 done
 
 # 4. ЗАЩИТА ОТ ДЕТЕКЦИИ МТС TTL=1:
-# МТС выдает детекцию раздачи, когда смартфон при форвардинге TTL=1 пакета отправляет вышке ответ ICMP Time Exceeded (Type 11)!
-# Мы блокируем уходящие ответы ICMP Time Exceeded на сотовые модемы и режем пробы TTL=1 исключительно в FORWARD!
+# Блокируем уходящие ответы ICMP Time Exceeded на сотовые модемы и режем пробы TTL=1 исключительно в FORWARD!
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t filter -A OUTPUT -o "$_celnt" -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true
     ip6tables -t filter -A OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
@@ -177,8 +179,12 @@ else
     ip6tables -t mangle -F nfqttlo
     ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
+    # Направляем транзитный IPv6-трафик раздачи во внешний мир в nfqttlo
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        ip6tables -t mangle -A FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
+    done
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-        ip6tables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
+        ip6tables -t mangle -A FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
     done
 fi
 
@@ -202,9 +208,14 @@ else
     iptables -t mangle -F nfqttlo
     iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
-    # Направляем в NFQUEUE ТОЛЬКО клиентские интерфейсы раздачи _if!
+    # НАПРАВЛЯЕМ В ОЧЕРЕДЬ СТРОГО ТРАФИК РАЗДАЧИ (FORWARD)!
+    # Это перехватывает транзитные пакеты раздаваемых устройств во внешнюю сеть и фиксирует им TTL=64,
+    # полностью освобождая собственный исходящий сотовый трафик смартфона!
+    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+        iptables -t mangle -A FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
+    done
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-        iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
+        iptables -t mangle -A FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
     done
 
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
