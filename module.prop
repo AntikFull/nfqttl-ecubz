@@ -1,6 +1,6 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v7.1
-versionCode=21
+version=v7.2
+versionCode=22
 author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Pure C binary (no libstdc++), Cellular PREROUTING TTL=1 & IPv6 NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz
+description=Smart Multi-Engine TTL fix, Precise Interface Scoping (No phone internet block) & Pure C NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz

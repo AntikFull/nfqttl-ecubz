@@ -2,8 +2,8 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.1 - Pure C TTL=64, Cellular PREROUTING & IPv6 NFQUEUE Engine
-# Compatible with: OnePlus 13 (Android 15 / OxygenOS), Android 7.0 - Android 16
+# Nfqttl eCubz v7.2 - Precise Tethering Scope Fix (No phone traffic hijacking)
+# Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
 PGREP_BIN=/system/bin/pgrep
@@ -47,6 +47,7 @@ iptables -t mangle -F nfqttlo 2>/dev/null || true
 iptables -t mangle -D PREROUTING -j nfqttli 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
+iptables -t mangle -D POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
 
 for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
@@ -115,7 +116,7 @@ if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
         ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
     done
 else
-    # Режим NFQUEUE для IPv6 Hop Limit = 64
+    # Режим NFQUEUE для IPv6 Hop Limit = 64 (Строго для сотовых модемов и точек раздачи)
     ip6tables -t mangle -N nfqttlo 2>/dev/null || true
     ip6tables -t mangle -F nfqttlo
     ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
@@ -137,9 +138,8 @@ if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
         iptables -t mangle -A POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
     done
-    iptables -t mangle -A POSTROUTING ! -o lo -j TTL --ttl-set 64 2>/dev/null || true
 else
-    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Например, OnePlus 13 / OxygenOS 15)
+    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl (Строго для сотовых модемов и точек раздачи)
     if ! nfqttl_alive; then
         "$MODDIR/nfqttl" -d
         sleep 2
@@ -155,7 +155,6 @@ else
     for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
         iptables -t mangle -A POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     done
-    iptables -t mangle -A POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
 
     WD_LOG=/data/local/tmp/nfqttl_watchdog.log
     WD_INTERVAL=60
