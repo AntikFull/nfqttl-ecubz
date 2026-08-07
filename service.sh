@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v8.1-stealth - Zero-Leak Startup Guard & Universal FORWARD TTL
+# Nfqttl eCubz v8.2-stealth - Ultimate IPv6 Hop Limit Lock & Zero-Leak Forward
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v8.1-stealth"
-VERSION_CODE="31"
+VERSION="v8.2-stealth"
+VERSION_CODE="32"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -55,11 +55,12 @@ ALL_CLIENT_IFS="wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+"
 iptables -t mangle -F nfqttlo 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
 iptables -t mangle -D POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
+iptables -t mangle -D FORWARD -j nfqttlo 2>/dev/null || true
 
 ip6tables -t mangle -F nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
+ip6tables -t mangle -D FORWARD -j nfqttlo 2>/dev/null || true
 
-# Удаление глобальных универсальных правил FORWARD
 iptables -t mangle -D FORWARD -j TTL --ttl-set 64 2>/dev/null || true
 ip6tables -t mangle -D FORWARD -j HL --hl-set 64 2>/dev/null || true
 
@@ -110,24 +111,45 @@ for _if in $ALL_CLIENT_IFS; do
     ip6tables -t nat -D PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
 done
 
-# 4. ЗАЩИТА ОТ ДЕТЕКЦИИ МТС TTL=1 И УТЕЧЕК СТАРТА РАЗДАЧИ:
-# Блокируем уходящие ответы ICMP Time Exceeded на сотовые модемы и режем пробы TTL=1 исключительно в FORWARD!
+# 4. ЗАЩИТА ОТ ДЕТЕКЦИИ МТС TTL=1:
 for _celnt in $ALL_CELL_IFS; do
     iptables -t filter -A OUTPUT -o "$_celnt" -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true
     ip6tables -t filter -A OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
     iptables -t mangle -A FORWARD -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
 done
 
-# 5. ГЛОБАЛЬНЫЙ ЗАЩИТНЫЙ ЩИТ РАЗДАЧИ (УБИВАЕТ УТЕЧКУ 400 КБ ПРИ СТАРТЕ РАЗДАЧИ)
-# Первым правилом в FORWARD принудительно ставим TTL=64 и Hop Limit=64 абсолютно ДЛЯ ВСЕХ транзитных пакетов!
+# 5. ГЛОБАЛЬНАЯ НАСТРОЙКА TTL (IPv4) И HOP LIMIT (IPv6)
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
+    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки)
     iptables -t mangle -I FORWARD 1 -j TTL --ttl-set 64 2>/dev/null || true
-fi
-if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
-    ip6tables -t mangle -I FORWARD 1 -j HL --hl-set 64 2>/dev/null || true
+else
+    # РЕЖИМ 2: NFQUEUE Daemon
+    if ! nfqttl_alive; then
+        "$MODDIR/nfqttl" -d
+        sleep 1
+    fi
+    iptables -t mangle -N nfqttlo 2>/dev/null || true
+    iptables -t mangle -F nfqttlo
+    iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
+    iptables -t mangle -I FORWARD 1 -j nfqttlo 2>/dev/null || true
 fi
 
-# 6. REDIRECT DNS (53) + Блокировка DoT (853) и локальных служебных протоколов Windows при старте
+if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
+    # РЕЖИМ 1 (IPv6): Нативный Kernel HL
+    ip6tables -t mangle -I FORWARD 1 -j HL --hl-set 64 2>/dev/null || true
+else
+    # РЕЖИМ 2 (IPv6): NFQUEUE Daemon - ВСТАВКА В САМУЮ ПЕРВУЮ СТРОКУ FORWARD!
+    if ! nfqttl_alive; then
+        "$MODDIR/nfqttl" -d
+        sleep 1
+    fi
+    ip6tables -t mangle -N nfqttlo 2>/dev/null || true
+    ip6tables -t mangle -F nfqttlo
+    ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
+    ip6tables -t mangle -I FORWARD 1 -j nfqttlo 2>/dev/null || true
+fi
+
+# 6. REDIRECT DNS (53) + Блокировка DoT (853) и локальных вещаний Windows
 for _if in $ALL_CLIENT_IFS; do
     iptables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
@@ -183,7 +205,7 @@ if [ -f "$BLOCKLIST_FILE" ]; then
     done < "$BLOCKLIST_FILE"
 fi
 
-# 9. Коррекция TCP MSS (заведена на интерфейсы раздачи, модемы и VPN tun+)
+# 9. Коррекция TCP MSS
 for _celnt in $ALL_CELL_IFS; do
     iptables -t mangle -A POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
@@ -191,112 +213,62 @@ for _if in $ALL_CLIENT_IFS; do
     iptables -t mangle -A POSTROUTING -o "$_if" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
 
-# 10. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
-if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
-    for _celnt in $ALL_CELL_IFS; do
-        ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
-    done
-    for _if in $ALL_CLIENT_IFS; do
-        ip6tables -t mangle -A POSTROUTING -o "$_if" -j HL --hl-set 64 2>/dev/null || true
-    done
-else
-    # Режим NFQUEUE для IPv6 Hop Limit = 64
-    if ! nfqttl_alive; then
-        "$MODDIR/nfqttl" -d
-        sleep 1
+# 10. Watchdog автоконтроля процессов
+WD_LOG=/data/local/tmp/nfqttl_watchdog.log
+WD_INTERVAL=20
+WD_MAX_RESTARTS=50
+
+wd_log() {
+    if [ -f "$WD_LOG" ] && [ "$(wc -c < "$WD_LOG" 2>/dev/null || echo 0)" -gt 65536 ]; then
+        tail -n 50 "$WD_LOG" > "$WD_LOG.tmp" 2>/dev/null && mv "$WD_LOG.tmp" "$WD_LOG"
     fi
+    echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$WD_LOG"
+}
 
-    ip6tables -t mangle -N nfqttlo 2>/dev/null || true
-    ip6tables -t mangle -F nfqttlo
-    ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
+watchdog() {
+    restarts=0
+    last_restart_time=$(date +%s 2>/dev/null || echo 0)
+    wd_log "watchdog запущен (авто-сброс усталости, контроль ip_forward, интервал ${WD_INTERVAL}с)"
 
-    for _celnt in $ALL_CELL_IFS; do
-        ip6tables -t mangle -A FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
-    done
-    for _if in $ALL_CLIENT_IFS; do
-        ip6tables -t mangle -A FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
-    done
-fi
+    while true; do
+        sleep "$WD_INTERVAL"
 
-# 11. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
-if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
-    # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
-    for _celnt in $ALL_CELL_IFS; do
-        iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
-    done
-    for _if in $ALL_CLIENT_IFS; do
-        iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
-    done
-else
-    # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl
-    if ! nfqttl_alive; then
-        "$MODDIR/nfqttl" -d
-        sleep 1
-    fi
+        echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
+        echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
 
-    iptables -t mangle -N nfqttlo 2>/dev/null || true
-    iptables -t mangle -F nfqttlo
-    iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
-
-    # НАПРАВЛЯЕМ В ОЧЕРЕДЬ СТРОГО ТРАФИК РАЗДАЧИ (FORWARD)!
-    for _celnt in $ALL_CELL_IFS; do
-        iptables -t mangle -A FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
-    done
-    for _if in $ALL_CLIENT_IFS; do
-        iptables -t mangle -A FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
-    done
-
-    WD_LOG=/data/local/tmp/nfqttl_watchdog.log
-    WD_INTERVAL=20
-    WD_MAX_RESTARTS=50
-
-    wd_log() {
-        if [ -f "$WD_LOG" ] && [ "$(wc -c < "$WD_LOG" 2>/dev/null || echo 0)" -gt 65536 ]; then
-            tail -n 50 "$WD_LOG" > "$WD_LOG.tmp" 2>/dev/null && mv "$WD_LOG.tmp" "$WD_LOG"
+        # Убеждаемся, что ip6tables nfqttlo правило держится в строке 1 FORWARD
+        if ! grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
+            ip6tables -t mangle -C FORWARD -j nfqttlo 2>/dev/null || ip6tables -t mangle -I FORWARD 1 -j nfqttlo 2>/dev/null || true
         fi
-        echo "[$(date '+%m-%d %H:%M:%S')] $*" >> "$WD_LOG"
-    }
 
-    watchdog() {
-        restarts=0
-        last_restart_time=$(date +%s 2>/dev/null || echo 0)
-        wd_log "watchdog запущен (авто-сброс усталости, контроль ip_forward, интервал ${WD_INTERVAL}с)"
-
-        while true; do
-            sleep "$WD_INTERVAL"
-
-            echo 1 > /proc/sys/net/ipv4/ip_forward 2>/dev/null || true
-            echo 1 > /proc/sys/net/ipv6/conf/all/forwarding 2>/dev/null || true
-
-            if nfqttl_alive; then
-                now=$(date +%s 2>/dev/null || echo 0)
-                if [ "$now" -gt 0 ] && [ "$last_restart_time" -gt 0 ]; then
-                    elapsed=$((now - last_restart_time))
-                    if [ "$elapsed" -ge 600 ] && [ "$restarts" -gt 0 ]; then
-                        wd_log "демон стабилен 10+ минут с момента последнего рестарта — сброс счетчика с $restarts до 0"
-                        restarts=0
-                    fi
+        if nfqttl_alive; then
+            now=$(date +%s 2>/dev/null || echo 0)
+            if [ "$now" -gt 0 ] && [ "$last_restart_time" -gt 0 ]; then
+                elapsed=$((now - last_restart_time))
+                if [ "$elapsed" -ge 600 ] && [ "$restarts" -gt 0 ]; then
+                    wd_log "демон стабилен 10+ минут с момента последнего рестарта — сброс счетчика с $restarts до 0"
+                    restarts=0
                 fi
-                continue
             fi
+            continue
+        fi
 
-            if [ "$restarts" -ge "$WD_MAX_RESTARTS" ]; then
-                wd_log "демон мёртв, лимит перезапусков исчерпан — прекращаю попытки"
-                break
-            fi
+        if [ "$restarts" -ge "$WD_MAX_RESTARTS" ]; then
+            wd_log "демон мёртв, лимит перезапусков исчерпан — прекращаю попытки"
+            break
+        fi
 
-            restarts=$((restarts + 1))
-            last_restart_time=$(date +%s 2>/dev/null || echo 0)
-            wd_log "демон не найден, перезапуск #$restarts"
-            "$MODDIR/nfqttl" -d
-            sleep 2
-        done
-    }
+        restarts=$((restarts + 1))
+        last_restart_time=$(date +%s 2>/dev/null || echo 0)
+        wd_log "демон не найден, перезапуск #$restarts"
+        "$MODDIR/nfqttl" -d
+        sleep 2
+    done
+}
 
-    watchdog &
-fi
+watchdog &
 
-# 12. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
+# 11. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
 if [ "$DEBUG_MODE" -eq 1 ]; then
     if [ -f "$MODDIR/debug_log.sh" ]; then
         sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &
