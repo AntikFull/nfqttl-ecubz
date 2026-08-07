@@ -2,12 +2,12 @@
 MODDIR=${0%/*}
 
 # ============================================================================
-# Nfqttl eCubz v7.9 - Sniper FORWARD NFQUEUE Scoping & Clean Cellular Ingress
+# Nfqttl eCubz v8.1-stealth - Zero-Leak Startup Guard & Universal FORWARD TTL
 # Compatible with: OnePlus 13 (Android 15/16), OxygenOS, Xiaomi, Samsung, All
 # ============================================================================
 
-VERSION="v7.9"
-VERSION_CODE="29"
+VERSION="v8.1-stealth"
+VERSION_CODE="31"
 
 # Фиксация примененной версии для предотвращения путаницы логов без перезагрузки
 echo "$VERSION ($VERSION_CODE)" > "$MODDIR/.applied_version" 2>/dev/null || true
@@ -48,6 +48,9 @@ if [ -f "$MODDIR/debug" ] || [ -f "$MODDIR/DEBUG" ]; then
     DEBUG_MODE=1
 fi
 
+ALL_CELL_IFS="rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+ tun+"
+ALL_CLIENT_IFS="wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+"
+
 # 3. Полная и симметричная очистка старых правил MANGLE, FILTER, NAT и унаследованных правил
 iptables -t mangle -F nfqttlo 2>/dev/null || true
 iptables -t mangle -D OUTPUT -j nfqttlo 2>/dev/null || true
@@ -56,7 +59,11 @@ iptables -t mangle -D POSTROUTING ! -o lo -j nfqttlo 2>/dev/null || true
 ip6tables -t mangle -F nfqttlo 2>/dev/null || true
 ip6tables -t mangle -D POSTROUTING -j nfqttlo 2>/dev/null || true
 
-for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+# Удаление глобальных универсальных правил FORWARD
+iptables -t mangle -D FORWARD -j TTL --ttl-set 64 2>/dev/null || true
+ip6tables -t mangle -D FORWARD -j HL --hl-set 64 2>/dev/null || true
+
+for _celnt in $ALL_CELL_IFS; do
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j nfqttlo 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
@@ -71,7 +78,7 @@ for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+
     ip6tables -t filter -D OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
 done
 
-for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+for _if in $ALL_CLIENT_IFS; do
     iptables -t mangle -D POSTROUTING -o "$_if" -j nfqttlo 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
     iptables -t mangle -D POSTROUTING -o "$_if" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
@@ -85,37 +92,61 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
 
     iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
     iptables -t mangle -D FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
-    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 5353 -j DROP 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 5355 -j DROP 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 1900 -j DROP 2>/dev/null || true
+    iptables -t mangle -D FORWARD -i "$_if" -p udp --dport 137:138 -j DROP 2>/dev/null || true
+
     iptables -t nat -D PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -D PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
 
     ip6tables -t mangle -D FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
     ip6tables -t mangle -D FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
+    ip6tables -t mangle -D FORWARD -i "$_if" -p udp --dport 5353 -j DROP 2>/dev/null || true
+    ip6tables -t mangle -D FORWARD -i "$_if" -p udp --dport 5355 -j DROP 2>/dev/null || true
+    ip6tables -t mangle -D FORWARD -i "$_if" -p udp --dport 1900 -j DROP 2>/dev/null || true
+
     ip6tables -t nat -D PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     ip6tables -t nat -D PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
 done
 
-# 4. ЗАЩИТА ОТ ДЕТЕКЦИИ МТС TTL=1:
+# 4. ЗАЩИТА ОТ ДЕТЕКЦИИ МТС TTL=1 И УТЕЧЕК СТАРТА РАЗДАЧИ:
 # Блокируем уходящие ответы ICMP Time Exceeded на сотовые модемы и режем пробы TTL=1 исключительно в FORWARD!
-for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+for _celnt in $ALL_CELL_IFS; do
     iptables -t filter -A OUTPUT -o "$_celnt" -p icmp --icmp-type time-exceeded -j DROP 2>/dev/null || true
     ip6tables -t filter -A OUTPUT -o "$_celnt" -p icmpv6 --icmpv6-type time-exceeded -j DROP 2>/dev/null || true
     iptables -t mangle -A FORWARD -i "$_celnt" -m ttl --ttl-eq 1 -j DROP 2>/dev/null || true
 done
 
-# 5. REDIRECT DNS (53) + Блокировка DoT (853) для IPv4 и IPv6
-for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+# 5. ГЛОБАЛЬНЫЙ ЗАЩИТНЫЙ ЩИТ РАЗДАЧИ (УБИВАЕТ УТЕЧКУ 400 КБ ПРИ СТАРТЕ РАЗДАЧИ)
+# Первым правилом в FORWARD принудительно ставим TTL=64 и Hop Limit=64 абсолютно ДЛЯ ВСЕХ транзитных пакетов!
+if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
+    iptables -t mangle -I FORWARD 1 -j TTL --ttl-set 64 2>/dev/null || true
+fi
+if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
+    ip6tables -t mangle -I FORWARD 1 -j HL --hl-set 64 2>/dev/null || true
+fi
+
+# 6. REDIRECT DNS (53) + Блокировка DoT (853) и локальных служебных протоколов Windows при старте
+for _if in $ALL_CLIENT_IFS; do
     iptables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     iptables -t mangle -A FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
+    iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 5353 -j DROP 2>/dev/null || true
+    iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 5355 -j DROP 2>/dev/null || true
+    iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 1900 -j DROP 2>/dev/null || true
+    iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 137:138 -j DROP 2>/dev/null || true
 
     ip6tables -t nat -A PREROUTING -i "$_if" -p udp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     ip6tables -t nat -A PREROUTING -i "$_if" -p tcp --dport 53 -j REDIRECT --to-ports 53 2>/dev/null || true
     ip6tables -t mangle -A FORWARD -i "$_if" -p tcp --dport 853 -j DROP 2>/dev/null || true
+    ip6tables -t mangle -A FORWARD -i "$_if" -p udp --dport 5353 -j DROP 2>/dev/null || true
+    ip6tables -t mangle -A FORWARD -i "$_if" -p udp --dport 5355 -j DROP 2>/dev/null || true
+    ip6tables -t mangle -A FORWARD -i "$_if" -p udp --dport 1900 -j DROP 2>/dev/null || true
 done
 
-# 6. Защита от NTP на IPv4 и IPv6
-for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+# 7. Защита от NTP на IPv4 и IPv6
+for _if in $ALL_CLIENT_IFS; do
     if [ "$DEBUG_MODE" -eq 1 ]; then
         iptables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j LOG --log-prefix "NFQTTL-NTP-BLOCK: " 2>/dev/null || true
     fi
@@ -123,7 +154,7 @@ for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
     ip6tables -t mangle -A FORWARD -i "$_if" -p udp --dport 123 -j DROP 2>/dev/null || true
 done
 
-# 7. Динамический парсинг и подгрузка блокировок из blocklist.txt (IPv4 & IPv6)
+# 8. Динамический парсинг и подгрузка блокировок из blocklist.txt (IPv4 & IPv6)
 BLOCKLIST_FILE="$MODDIR/blocklist.txt"
 HAS_IP6_STRING=0
 if grep -q string /proc/net/ip6_tables_matches 2>/dev/null; then
@@ -135,7 +166,7 @@ if [ -f "$BLOCKLIST_FILE" ]; then
         domain=$(echo "$line" | sed -e 's/#.*//' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | tr -d '\r')
         [ -z "$domain" ] && continue
 
-        for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+        for _if in $ALL_CLIENT_IFS; do
             iptables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j LOG --log-prefix "NFQTTL-BLOCK: " 2>/dev/null || true
             iptables -t mangle -D FORWARD -i "$_if" -m string --string "$domain" --algo bm -j DROP 2>/dev/null || true
 
@@ -152,20 +183,20 @@ if [ -f "$BLOCKLIST_FILE" ]; then
     done < "$BLOCKLIST_FILE"
 fi
 
-# 8. Коррекция TCP MSS (заведена на интерфейсы раздачи и модемы)
-for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+# 9. Коррекция TCP MSS (заведена на интерфейсы раздачи, модемы и VPN tun+)
+for _celnt in $ALL_CELL_IFS; do
     iptables -t mangle -A POSTROUTING -o "$_celnt" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
-for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+for _if in $ALL_CLIENT_IFS; do
     iptables -t mangle -A POSTROUTING -o "$_if" -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtud 2>/dev/null || true
 done
 
-# 9. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
+# 10. Фиксация IPv6 Hop Limit = 64 (Kernel HL vs Userspace NFQUEUE)
 if grep -q HL /proc/net/ip6_tables_targets 2>/dev/null; then
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+    for _celnt in $ALL_CELL_IFS; do
         ip6tables -t mangle -A POSTROUTING -o "$_celnt" -j HL --hl-set 64 2>/dev/null || true
     done
-    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+    for _if in $ALL_CLIENT_IFS; do
         ip6tables -t mangle -A POSTROUTING -o "$_if" -j HL --hl-set 64 2>/dev/null || true
     done
 else
@@ -179,23 +210,22 @@ else
     ip6tables -t mangle -F nfqttlo
     ip6tables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
-    # Направляем транзитный IPv6-трафик раздачи во внешний мир в nfqttlo
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+    for _celnt in $ALL_CELL_IFS; do
         ip6tables -t mangle -A FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
     done
-    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+    for _if in $ALL_CLIENT_IFS; do
         ip6tables -t mangle -A FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
     done
 fi
 
-# 10. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
+# 11. Настройка фиксации TTL (Kernel TTL vs Userspace NFQUEUE)
 if grep -q TTL /proc/net/ip_tables_targets 2>/dev/null; then
     # РЕЖИМ 1: Нативный Kernel TTL (0% нагрузки на CPU)
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+    for _celnt in $ALL_CELL_IFS; do
         iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     done
-    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
-        iptables -t mangle -A POSTROUTING -o "$_if" -j TTL --ttl-set 64 2>/dev/null || true
+    for _if in $ALL_CLIENT_IFS; do
+        iptables -t mangle -A POSTROUTING -o "$_celnt" -j TTL --ttl-set 64 2>/dev/null || true
     done
 else
     # РЕЖИМ 2: Userspace NFQUEUE + Daemon Nfqttl
@@ -209,12 +239,10 @@ else
     iptables -t mangle -A nfqttlo -j NFQUEUE --queue-num 6464 --queue-bypass
 
     # НАПРАВЛЯЕМ В ОЧЕРЕДЬ СТРОГО ТРАФИК РАЗДАЧИ (FORWARD)!
-    # Это перехватывает транзитные пакеты раздаваемых устройств во внешнюю сеть и фиксирует им TTL=64,
-    # полностью освобождая собственный исходящий сотовый трафик смартфона!
-    for _celnt in rmnet+ rmnet_data+ r_rmnet_data+ rmnet_mhi+ rmnet_ipa+ ccmni+ pdp+; do
+    for _celnt in $ALL_CELL_IFS; do
         iptables -t mangle -A FORWARD -o "$_celnt" -j nfqttlo 2>/dev/null || true
     done
-    for _if in wlan+ ap+ swlan+ softap+ rndis+ usb+ bt-pan+ pan+; do
+    for _if in $ALL_CLIENT_IFS; do
         iptables -t mangle -A FORWARD -o "$_if" -j nfqttlo 2>/dev/null || true
     done
 
@@ -268,7 +296,7 @@ else
     watchdog &
 fi
 
-# 11. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
+# 12. Отладочный режим: если есть файл debug или DEBUG — автоматически генерируем nfqttl_debug.log
 if [ "$DEBUG_MODE" -eq 1 ]; then
     if [ -f "$MODDIR/debug_log.sh" ]; then
         sh "$MODDIR/debug_log.sh" >/dev/null 2>&1 &

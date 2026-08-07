@@ -1,7 +1,7 @@
 id=nfqttl_ecubz
 name=Nfqttl eCubz
-version=v7.9
-versionCode=29
-author=Cyborg-one / eCubz
-description=Smart Multi-Engine TTL fix, Precise FORWARD NFQUEUE Scoping, ICMP MTS Bypass & Pure C NFQUEUE. github: https://github.com/AntikFull/nfqttl-ecubz
+version=v8.1-stealth
+versionCode=31
+author=eCubz (https://t.me/eCubz)
+description=Smart Multi-Engine TTL fix, Universal FORWARD TTL Shield, VPN Tun Support & Anti-Leak Startup Guard. github: https://github.com/AntikFull/nfqttl-ecubz
 
