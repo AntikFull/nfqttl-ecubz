@@ -1,7 +1,0 @@
-id=nfqttl_ecubz
-name=Nfqttl eCubz
-version=v8.2-stealth
-versionCode=32
-author=eCubz (https://t.me/eCubz)
-description=Smart Multi-Engine TTL fix, Absolute IPv6 Hop Limit Lock & Zero-Leak Forward. github: https://github.com/AntikFull/nfqttl-ecubz
-
